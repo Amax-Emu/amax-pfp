@@ -23,21 +23,23 @@ static_detour! {
     static GamePictureManager_CreateHook: unsafe extern "system" fn(i32,i32,*const [u8;32],bool) -> bool;
 }
 
+
+
 /// Called when the DLL is attached to the process.
 unsafe fn main() {
 
     // let address = 0x00d5e170;
     // let target = mem::transmute(address);
     // GetPrimaryProfilePictureHook
-    // .initialize(target, messageboxw_detour).unwrap()
+    // .initialize(target, primary_picture_load).unwrap()
     // .enable().unwrap();
 
 
-    let address = 0x0079dc50; //gamerpicmanager_create
-    let target = mem::transmute(address);
-    GamePictureManager_CreateHook
-    .initialize(target, manager_create).unwrap()
-    .enable().unwrap();
+    // let address = 0x0079dc50; //gamerpicmanager_create
+    // let target = mem::transmute(address);
+    // GamePictureManager_CreateHook
+    // .initialize(target, manager_create).unwrap()
+    // .enable().unwrap();
 
   }
 
@@ -84,10 +86,14 @@ info!("max_local: {max_local}, max_remote:{max_remote},default_texture: {default
 return true
 }
 
-fn messageboxw_detour(gp_mng: u32) -> bool {
-  // Call the original `MessageBoxW`, but replace the caption
-  println!("{:?}",gp_mng);
-  return true
+fn primary_picture_load(pad_id:u32) -> bool {
+
+  println!("{:?}",pad_id);
+
+
+ 
+
+  return false
 }
 
 #[no_mangle]
@@ -128,6 +134,7 @@ pub fn init(module: HMODULE) {
     log_panics::init();
     log::info!("Hi from: {module:X?}");
     //unsafe { main(); }
+   
     std::thread::spawn(|| {
         loop {
             unsafe {
@@ -135,39 +142,39 @@ pub fn init(module: HMODULE) {
                 // let EXE_BASE_ADDR = 0x00400000;
                 // let mut addr = EXE_BASE_ADDR + 0x00D44EE4;
                 let EXE_BASE_ADDR = 0x00400000;
-
+    
                 let start = EXE_BASE_ADDR + 0x00D44EE4;
-
-
+    
+    
                 let ptr =  start as *const i32;
                 info!("Addr of start: {:?}",start);
                 info!("Addr of ptr1: {:p},value: {}",ptr,*ptr);
-
+    
                 if *ptr == 0 {
                     std::thread::sleep(std::time::Duration::from_secs(1));
                     continue;
                 }
-
+    
                 let step2 = *ptr;
-
+    
                 let step3 = step2 + 0x14;
                 
                 let step4 = step3 as *const i32;
                 info!("Addr of step4: {:p},value: {}",step4,*step4);
                 let d3d9_ptr_real = *step4 as *mut IDirect3DDevice9;
                 info!("Addr of d3d device_real: {:p}",d3d9_ptr_real);
-
+    
                 // let step4 = step3 as *const i32;
                 // info!("Addr of step4: {:p},value: {}",step4,*step4);
                 let d3d9_ptr = step3 as *mut IDirect3DDevice9;
                 info!("Addr of d3d device: {:p}",d3d9_ptr);
-
+    
                 // let mut addr2 = addr + 0x14;
                 // info!("Addr of d3d device 2: {:?}",addr2);
                 // let mut addr3 = &addr2 as *const i32;
                 // info!("Addr of d3d device 3: {}",*addr3);
                 
-
+    
                 // let value  = std::slice::from_raw_parts(addr3,4);
                 // info!("Addr of d3d device 4: {:?}",value);
                 // new_gpu = mem::transmute(addr);
@@ -177,44 +184,49 @@ pub fn init(module: HMODULE) {
                 //info!("Addr of d3d device 2: {:?},{:?}",new_gpu,*new_gpu);
                 let mut text: Option<IDirect3DTexture9> = None;
                 info!("Addr of texture: {:p}",ptr::addr_of_mut!(text));
-                let result = IDirect3DDevice9::CreateTexture( &*d3d9_ptr,64, 64, 1, 1, D3DFORMAT(21), D3DPOOL(0), ptr::addr_of_mut!(text), ptr::null_mut());
+                let result = IDirect3DDevice9::CreateTexture( &*d3d9_ptr,64, 64, 1, 0, D3DFORMAT(827611204), D3DPOOL(1), ptr::addr_of_mut!(text), ptr::null_mut());
                 info!("Result: {:?}",result);
-
-
+    
+    
                 let address = get_module_symbol_address("d3dx9_42.dll", "D3DXCreateTextureFromFileA")
                     .expect("could not find 'D3DXCreateTextureFromFileA' address");
                 info!("Addr of D3DXCreateTextureFromFileA: {}",address);
-
-
+    
+    
                 let filename = String::from("./test.bmp");
                 let filename_bytes = filename.as_bytes().to_owned();
                 type D3DXCreateTextureFromFileA = extern "stdcall" fn(device:&IDirect3DDevice9,filename:*const u8,text:*mut IDirect3DTexture9) -> HRESULT;
                 
-
+    
                 let mut text2: IDirect3DTexture9 = text.unwrap();
-
+    
                 let my_func: D3DXCreateTextureFromFileA = std::mem::transmute(address);
-
+    
                 // let result = my_func(
                 //     &*d3d9_ptr,
                 //     ptr::addr_of!(filename_bytes[0]),
                 //     ptr::addr_of_mut!(text)
                 // );
-
+    
                 let result = my_func(
                     &*d3d9_ptr_real,
                     ptr::addr_of!(filename_bytes[0]),
                     ptr::addr_of_mut!(text2)
                 );
-
+                info!("Addr of texture: {:p}",ptr::addr_of_mut!(text2));
+                let hook1 = ptr::addr_of_mut!(text2) as *mut i32;
+                info!("REAL Addr of texture: {:?}",*hook1);
                 info!("Result: {:?}",result);
-
+    
                 
-                break;
+                
+                loop {
+                    //Abomination to keep memory. Should be changed to static/box/update pfp own texture
+                    std::thread::sleep(std::time::Duration::from_secs(60));
+                }
             }
         }
     });
-
 
     let _ptr_base: *mut c_void = unsafe { GetModuleHandleA(PCSTR::null()) }.unwrap().0 as _;
 }
