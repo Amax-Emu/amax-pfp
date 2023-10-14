@@ -2,7 +2,7 @@ use std::{ffi::{c_void, CString}, mem, iter, ptr};
 
 use log::info;
 use simplelog::*;
-use winapi::shared::ntdef::LPCSTR;
+use winapi::shared::{ntdef::LPCSTR, d3d9types::D3DCOLOR};
 use windows::{
     core::{PCSTR, PCWSTR, HRESULT},
     Win32::System::SystemServices::{DLL_PROCESS_ATTACH, DLL_PROCESS_DETACH},
@@ -16,23 +16,29 @@ use windows::Win32::Graphics::Direct3D9::*;
 use retour::static_detour;
 
 static_detour! {
-    static GetPrimaryProfilePictureHook: unsafe extern "system" fn(u32) -> bool;
+    static GetPrimaryProfilePictureHook: unsafe extern "system" fn() -> bool;
   }
 
 static_detour! {
     static GamePictureManager_CreateHook: unsafe extern "system" fn(i32,i32,*const [u8;32],bool) -> bool;
 }
 
+type D3DXCreateTextureFromFileA = extern "stdcall" fn(device:&IDirect3DDevice9,filename:*const u8,text:*mut IDirect3DTexture9) -> HRESULT;
+type D3DXCreateTextureFromFileExA = extern "stdcall" fn(device:&IDirect3DDevice9,filename:*const u8, Width: u32, Height: u32, MipLevels: u32,
+    Usage: u32, Format: D3DFORMAT, Pool: D3DPOOL, Filter: u32, MipFilter: u32,
+    ColorKey: D3DCOLOR, pSrcInfo: *mut c_void, pPalette: *mut c_void,
+    ppTexture: *mut IDirect3DTexture9,
+) -> HRESULT;
 
 
 /// Called when the DLL is attached to the process.
 unsafe fn main() {
 
-    // let address = 0x00d5e170;
-    // let target = mem::transmute(address);
-    // GetPrimaryProfilePictureHook
-    // .initialize(target, primary_picture_load).unwrap()
-    // .enable().unwrap();
+    let address = 0x00d5e170;
+    let target = mem::transmute(address);
+    GetPrimaryProfilePictureHook
+    .initialize(target, primary_picture_load).unwrap()
+    .enable().unwrap();
 
 
     // let address = 0x0079dc50; //gamerpicmanager_create
@@ -64,20 +70,22 @@ const DATA: [u8; 80] = [
 
 
 */
+#[derive(Debug)]
+#[repr(C)]
 struct C_GamerPicture { //total size on pc: 80
-    unk0: u32, //0xA8, 0xEA, 0x00, 0x00
+    unk0: u32, //0x4C 0xA8, 0xEA, 0x00,
+    small_unk0: u8,
     Ref_aka_pad_id: u8, //0x00
     UserInformation: [u8;18], // 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x0C, 0x00, 0x00, 0x00
     active: bool, // 0x00
     free: bool, // 0x01
-    GamerPicName: [u8;20], //GAMERPIC_X or REMOTE_GAMERPIC_X
-    size_as_big_end_temp: u32, // 0x00, 0x00, 0x00, 0x40
-    unk_zeroes: u32, // 0x00, 0x00, 0x00, 0x00
+    GamerPicName: [u8;30], //GAMERPIC_X or REMOTE_GAMERPIC_X
+    size_as_big_end_temp: u32, // 0x00, 0x00, 0x00, 0x00
+    unk_zeroes: u32, // 0x00, 0x40 0x00, 0x00,
     unk_4_as_u16: u16, //0x04, 0x00,
-    new_texture_ptr: u32,  //0xE0, 0x71 0x90, 0x14
+    new_texture_ptr: *mut IDirect3DTexture9,  //0xE0, 0x71 0x90, 0x14
     default_texture_ptr: u32, //   0xB0, 0xCB 0x40, 0x0F
-    unk4: u16, // 0x00, 0x00
-    last_3_bytes: [u8;3] //0x00, 0x00, 0x4C
+    unk4: u32, // 0x00, 0x00
 }
 
 fn manager_create(max_local:i32,max_remote:i32,default_texture:*const [u8;32],small:bool) -> bool {
@@ -86,12 +94,93 @@ info!("max_local: {max_local}, max_remote:{max_remote},default_texture: {default
 return true
 }
 
-fn primary_picture_load(pad_id:u32) -> bool {
+fn primary_picture_load() -> bool {
+    unsafe {
+    info!("GetPrimaryProfilePicture detour!");
+    let EXE_BASE_ADDR = 0x00400000;
+    let local_start = EXE_BASE_ADDR + 0x00D61518;
+    info!("Addr of start: {:?}",local_start);
 
-  println!("{:?}",pad_id);
+    let ptr =  local_start as *const i32;    
+    info!("Addr of local pictures ptr: {:p},value: {:?}",ptr,*ptr);
+
+    let ptr =  *ptr as *mut [C_GamerPicture;4];
+    info!("Addr of start: {:?}",local_start);
+    info!("Addr of local pictures ptr: {:p}",&ptr);
+
+    for picture in &mut *ptr {
+        info!("Addr of picture: {:p} Data: {:?}",ptr::addr_of!(picture),picture);
+        let mut name = String::from_utf8(picture.GamerPicName.to_vec()).unwrap();
+        name = name.trim_matches(char::from(0)).to_string();
+        info!("{}",&name);
+
+        if name == "GAMERPIC_0" {
+
+            let start = EXE_BASE_ADDR + 0x00D44EE4;
+    
+    
+            let ptr =  start as *const i32;
+            info!("Addr of start: {:?}",start);
+            info!("Addr of ptr1: {:p},value: {}",ptr,*ptr);
+
+            if *ptr == 0 {
+                std::thread::sleep(std::time::Duration::from_secs(1));
+                continue;
+            }
+
+            let step2 = *ptr;
+
+            let step3 = step2 + 0x14;
+            
+            let step4 = step3 as *const i32;
+            info!("Addr of step4: {:p},value: {}",step4,*step4);
+            let d3d9_ptr_real = *step4 as *mut IDirect3DDevice9;
+            info!("Addr of d3d device_real: {:p}",d3d9_ptr_real);
+            
+            let filename = String::from("./test.dds");
+            let filename_bytes = filename.as_bytes().to_owned();
+
+            // let address = get_module_symbol_address("d3dx9_42.dll", "D3DXCreateTextureFromFileA")
+            // .expect("could not find 'D3DXCreateTextureFromFileA' address");
 
 
- 
+            let address = get_module_symbol_address("d3dx9_42.dll", "D3DXCreateTextureFromFileA")
+            .expect("could not find 'D3DXCreateTextureFromFileA' address");
+
+            let my_func: D3DXCreateTextureFromFileA = std::mem::transmute(address);
+
+            let result = my_func(
+                &*d3d9_ptr_real,
+                ptr::addr_of!(filename_bytes[0]),
+                picture.new_texture_ptr
+            );
+
+            // let result = my_func(
+            //     &*d3d9_ptr_real,
+            //     ptr::addr_of!(filename_bytes[0]),
+            //     64,
+            //     64,
+            //     1,
+            //     0,
+            //     D3DFORMAT(827611204), 
+            //     D3DPOOL(1),
+            //     0,
+            //     0,
+            //     0,
+            //     ptr::null_mut(),
+            //     ptr::null_mut(),
+            //     picture.new_texture_ptr
+            // );
+
+
+            info!("Result: {:?}",result);
+            picture.active = true;
+
+        }
+    }
+
+
+    }
 
   return false
 }
@@ -133,7 +222,7 @@ pub fn init(module: HMODULE) {
     .unwrap();
     log_panics::init();
     log::info!("Hi from: {module:X?}");
-    //unsafe { main(); }
+    unsafe { main(); }
    
     std::thread::spawn(|| {
         loop {
