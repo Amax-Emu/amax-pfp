@@ -35,11 +35,7 @@ static_detour! {
     static GamePictureManager_CreateHook: unsafe extern "system" fn(i32,i32,*const [u8;32],bool) -> bool;
 }
 
-struct texture {
-    data: Option<IDirect3DTexture9>
-}
 
-static TEST: Mutex<texture> = Mutex::new(texture { data: None });
 
 type D3DXCreateTextureFromFileA = extern "stdcall" fn(
     device: &IDirect3DDevice9,
@@ -121,7 +117,7 @@ struct C_GamerPicture {
     size_as_big_end_temp: u32, // 0x00, 0x00, 0x00, 0x00
     unk_zeroes: u32,           // 0x00, 0x40 0x00, 0x00,
     unk_4_as_u16: u16,         //0x04, 0x00,
-    new_texture_ptr: *mut IDirect3DTexture9, //0xE0, 0x71 0x90, 0x14
+    new_texture_ptr: IDirect3DTexture9, //0xE0, 0x71 0x90, 0x14
     default_texture_ptr: u32,  //   0xB0, 0xCB 0x40, 0x0F
     unk4: u32,                 // 0x00, 0x00
 }
@@ -190,7 +186,7 @@ fn primary_picture_load() -> bool {
 
                 let address =
                     get_module_symbol_address("d3dx9_42.dll", "D3DXCreateTextureFromFileExA")
-                        .expect("could not find 'D3DXCreateTextureFromFileExA' address");
+                        .expect("could not find 'D3DXCreateTextureFromFileA' address");
 
                 let my_func: D3DXCreateTextureFromFileExA = std::mem::transmute(address);
 
@@ -216,24 +212,27 @@ fn primary_picture_load() -> bool {
                 //     picture.new_texture_ptr,
                 // );
 
-                // let result = my_func(
-                //     &*d3d9_ptr_real,
-                //     ptr::addr_of!(filename_bytes[0]),
-                //     64,
-                //     64,
-                //     1,
-                //     0,
-                //     D3DFORMAT(827611204),
-                //     D3DPOOL(1),
-                //     1,
-                //     1,
-                //     0xFF000000,
-                //     ptr::null_mut(),
-                //     ptr::null_mut(),
-                //     picture.new_texture_ptr
-                // );
+                let result = my_func(
+                    &*d3d9_ptr_real,
+                    ptr::addr_of!(filename_bytes[0]),
+                    64,
+                    64,
+                    1,
+                    0,
+                    D3DFORMAT(827611204),
+                    D3DPOOL(1),
+                    1,
+                    1,
+                    0xFF000000,
+                    ptr::null_mut(),
+                    ptr::null_mut(),
+                    ptr::addr_of_mut!(picture.new_texture_ptr)
+                );
 
-                //info!("Result: {:?}", result);
+                info!("Result: {:?}", result);
+
+
+
                 picture.active = true;
             }
         }
