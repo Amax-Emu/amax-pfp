@@ -98,7 +98,11 @@ fn primary_picture_load() -> bool {
             if name == "GAMERPIC_0" {
 
                 let filename = std::path::PathBuf::from("./test4.dds");
-                let result = fill_gamerpic_texture_from_file(picture.new_texture_ptr,filename);
+
+                let d3d9_device = unsafe { get_d3d9_device() };
+
+                let result = unsafe {crate::d3d9_utils::d3d9_load_texture_from_file(*d3d9_device, texture, img_file_path) };
+
                 info!("Result: {:?}", result);
 
                 if result.is_err() {
@@ -113,11 +117,9 @@ fn primary_picture_load() -> bool {
     return false;
 }
 
-fn fill_gamerpic_texture_from_file(texture: IDirect3DTexture9,img_file_path: std::path::Path) -> Result<(),()> {
-    let d3d9_device = unsafe { get_d3d9_device() };
+// fn fill_gamerpic_texture_from_file(texture: IDirect3DTexture9,img_file_path: std::path::Path) -> Result<(),()> {
 
-    let result = unsafe {crate::d3d9_utils::d3d9_load_texture_from_file(*d3d9_device, texture, img_file_path) };
 
-    return result;
+//     return result;
 
-}
+// }

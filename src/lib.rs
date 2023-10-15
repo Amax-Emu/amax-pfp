@@ -18,16 +18,14 @@ use windows::{
 };
 
 mod d3d9_utils;
-mod img_preprocess;
+//mod img_preprocess;
 mod gamer_picture_manager;
 
 pub static EXE_BASE_ADDR: i32 = 0x00400000;
 
-use crate::gamer_picture_manager::*;
-
+//use crate::gamer_picture_manager::*;
 
 /// Called when the DLL is attached to the process.
-
 
 /*
 00000040 A8 EA 00 00:00 00 00 00|00 00 00 00:00 00 00 00
@@ -90,9 +88,9 @@ pub fn init(module: HMODULE) {
     log_panics::init();
     log::info!("Hi from: {module:X?}");
 
-    unsafe {
-        create_get_primary_profile_picture_hook();
-    }
+    // unsafe {
+    //     create_get_primary_profile_picture_hook();
+    // }
 
     let _ptr_base: *mut c_void = unsafe { GetModuleHandleA(PCSTR::null()) }.unwrap().0 as _;
 }
@@ -100,5 +98,3 @@ pub fn init(module: HMODULE) {
 pub fn free(module: HMODULE) {
     log::info!("Bye from: {module:X?}");
 }
-
-
