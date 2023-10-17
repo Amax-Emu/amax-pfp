@@ -1,12 +1,13 @@
 use std::io::Read;
-use image::{GenericImage, GenericImageView, ImageBuffer, RgbImage, imageops::FilterType::Lanczos3, codecs::bmp, ImageOutputFormat};
+use image::{GenericImage, GenericImageView, ImageBuffer, RgbImage, imageops::FilterType::Lanczos3, codecs::bmp, ImageOutputFormat, ImageFormat};
+use log::info;
 use std::io::Cursor;
 
 //static URL_BASE: String = String::From("https://amax-emu.com/api/");
 
-pub fn get_image_from_url() -> Vec<u8> {
-                    //IMAGE DOWNLOAD
-                let resp = ureq::get("https://cdn.discordapp.com/avatars/925665499692544040/483eb1b92db6a449a0e2bed9a8b48bb3.png")
+pub fn get_image_from_url(url:&str) -> Vec<u8> {
+
+                let resp = ureq::get(url)
                 .call().unwrap();
 
                 let len = resp
@@ -25,13 +26,14 @@ pub fn get_image_from_url() -> Vec<u8> {
 
                 img = img.resize(64, 64, Lanczos3);
 
-                let mut img_buffer: Cursor<Vec<u8>> = Cursor::new(vec![]);
-
-                img.write_to(&mut img_buffer, ImageOutputFormat::Bmp);
-
                 let mut return_vec: Vec<u8> = vec![];
+                //let img2 = img.to_rgb8();
+                //let return_vec = img2.to_vec();
+                img.write_to(&mut Cursor::new(&mut return_vec), ImageOutputFormat::Bmp).unwrap();
 
-                img_buffer.read_to_end(&mut return_vec);
+                //img.save_with_format("./debug.bmp", ImageFormat::Bmp);
+                
+                //std::fs::write("./debug2.bmp", &return_vec);
 
                 return return_vec;
 

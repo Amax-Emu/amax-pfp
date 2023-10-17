@@ -50,7 +50,7 @@ type D3DXCreateTextureFromFileInMemory = extern "stdcall" fn(
 
 type D3DXCreateTextureFromFileInMemoryEx = extern "stdcall" fn(
     device: &IDirect3DDevice9,
-    pSrcData: *mut Vec<u8>,
+    pSrcData: *mut u8,
     SrcDataSize: usize,
     Width: u32,
     Height: u32,
@@ -114,7 +114,7 @@ pub fn d3d9_load_texture_from_file(
             texture_ptr,
         );
 
-        info!("Result of D3DXCreateTextureFromFileA: {:?}", &result);
+        debug!("Result of D3DXCreateTextureFromFileA: {:?}", &result);
 
         if result.is_ok() {
             Ok(())
@@ -148,7 +148,7 @@ pub fn d3d9_load_texture_from_file_ex(
             height,
             1,
             0,
-            D3DFORMAT(827611204),
+            D3DFORMAT(20), //dxt1 is rather noisy, so rgb8
             D3DPOOL(1),
             1,
             1,
@@ -158,7 +158,7 @@ pub fn d3d9_load_texture_from_file_ex(
             texture_ptr,
         );
 
-        info!("Result of D3DXCreateTextureFromFileExA: {:?}", &result);
+        debug!("Result of D3DXCreateTextureFromFileExA: {:?}", &result);
 
         if result.is_ok() {
             Ok(())
@@ -181,13 +181,13 @@ pub fn d3d9_load_texture_from_memory_ex(texture_ptr: *mut IDirect3DTexture9, mut
     unsafe {
     let result = d3d9_func(
         &*device,
-        ptr::addr_of_mut!(tex_buffer),
+        ptr::addr_of_mut!(tex_buffer[0]), //todo: fix this
         tex_buffer.len(),
         width,
         height,
         1,
         0,
-        D3DFORMAT(827611204),
+        D3DFORMAT(20),
         D3DPOOL(1),
         1,
         1,
@@ -196,6 +196,8 @@ pub fn d3d9_load_texture_from_memory_ex(texture_ptr: *mut IDirect3DTexture9, mut
         ptr::null_mut(),
         texture_ptr,
     );
+
+    debug!("Result of D3DXCreateTextureFromFileInMemoryEx: {:?}", &result);
 
     if result.is_ok() {
         Ok(())
@@ -206,75 +208,75 @@ pub fn d3d9_load_texture_from_memory_ex(texture_ptr: *mut IDirect3DTexture9, mut
 
 }
 
-unsafe fn legacy_create_texture() {
-    let mut new_gpu: *mut IDirect3DDevice9 = ptr::null_mut();
-    // let EXE_BASE_ADDR = 0x00400000;
-    // let mut addr = EXE_BASE_ADDR + 0x00D44EE4;
-    let EXE_BASE_ADDR = 0x00400000;
+// unsafe fn legacy_create_texture() {
+//     let mut new_gpu: *mut IDirect3DDevice9 = ptr::null_mut();
+//     // let EXE_BASE_ADDR = 0x00400000;
+//     // let mut addr = EXE_BASE_ADDR + 0x00D44EE4;
+//     let EXE_BASE_ADDR = 0x00400000;
 
-    let start = EXE_BASE_ADDR + 0x00D44EE4;
+//     let start = EXE_BASE_ADDR + 0x00D44EE4;
 
-    let ptr = start as *const i32;
-    info!("Addr of start: {:?}", start);
-    info!("Addr of ptr1: {:p},value: {}", ptr, *ptr);
+//     let ptr = start as *const i32;
+//     info!("Addr of start: {:?}", start);
+//     info!("Addr of ptr1: {:p},value: {}", ptr, *ptr);
 
-    if *ptr == 0 {
-        std::thread::sleep(std::time::Duration::from_secs(1));
-    }
+//     if *ptr == 0 {
+//         std::thread::sleep(std::time::Duration::from_secs(1));
+//     }
 
-    let step2 = *ptr;
+//     let step2 = *ptr;
 
-    let step3 = step2 + 0x14;
+//     let step3 = step2 + 0x14;
 
-    let step4 = step3 as *const i32;
-    info!("Addr of step4: {:p},value: {}", step4, *step4);
-    let d3d9_ptr_real = *step4 as *mut IDirect3DDevice9;
-    info!("Addr of d3d device_real: {:p}", d3d9_ptr_real);
+//     let step4 = step3 as *const i32;
+//     info!("Addr of step4: {:p},value: {}", step4, *step4);
+//     let d3d9_ptr_real = *step4 as *mut IDirect3DDevice9;
+//     info!("Addr of d3d device_real: {:p}", d3d9_ptr_real);
 
-    let d3d9_ptr = step3 as *mut IDirect3DDevice9;
-    info!("Addr of d3d device: {:p}", d3d9_ptr);
+//     let d3d9_ptr = step3 as *mut IDirect3DDevice9;
+//     info!("Addr of d3d device: {:p}", d3d9_ptr);
 
-    let mut text: Option<IDirect3DTexture9> = None;
-    info!("Addr of texture: {:p}", ptr::addr_of_mut!(text));
-    let result = IDirect3DDevice9::CreateTexture(
-        &*d3d9_ptr,
-        64,
-        64,
-        1,
-        0,
-        D3DFORMAT(827611204),
-        D3DPOOL(1),
-        ptr::addr_of_mut!(text),
-        ptr::null_mut(),
-    );
-    info!("Result: {:?}", result);
+//     let mut text: Option<IDirect3DTexture9> = None;
+//     info!("Addr of texture: {:p}", ptr::addr_of_mut!(text));
+//     let result = IDirect3DDevice9::CreateTexture(
+//         &*d3d9_ptr,
+//         64,
+//         64,
+//         1,
+//         0,
+//         D3DFORMAT(827611204),
+//         D3DPOOL(1),
+//         ptr::addr_of_mut!(text),
+//         ptr::null_mut(),
+//     );
+//     info!("Result: {:?}", result);
 
-    let address = get_module_symbol_address("d3dx9_42.dll", "D3DXCreateTextureFromFileA")
-        .expect("could not find 'D3DXCreateTextureFromFileA' address");
-    info!("Addr of D3DXCreateTextureFromFileA: {}", address);
+//     let address = get_module_symbol_address("d3dx9_42.dll", "D3DXCreateTextureFromFileA")
+//         .expect("could not find 'D3DXCreateTextureFromFileA' address");
+//     info!("Addr of D3DXCreateTextureFromFileA: {}", address);
 
-    let filename = String::from("./test.bmp");
-    let filename_bytes = filename.as_bytes().to_owned();
-    type D3DXCreateTextureFromFileA = extern "stdcall" fn(
-        device: &IDirect3DDevice9,
-        filename: *const u8,
-        text: *mut IDirect3DTexture9,
-    ) -> HRESULT;
+//     let filename = String::from("./test.bmp");
+//     let filename_bytes = filename.as_bytes().to_owned();
+//     type D3DXCreateTextureFromFileA = extern "stdcall" fn(
+//         device: &IDirect3DDevice9,
+//         filename: *const u8,
+//         text: *mut IDirect3DTexture9,
+//     ) -> HRESULT;
 
-    let mut text2: IDirect3DTexture9 = text.unwrap();
+//     let mut text2: IDirect3DTexture9 = text.unwrap();
 
-    let my_func: D3DXCreateTextureFromFileA = std::mem::transmute(address);
+//     let my_func: D3DXCreateTextureFromFileA = std::mem::transmute(address);
 
-    let result = my_func(
-        &*d3d9_ptr_real,
-        ptr::addr_of!(filename_bytes[0]),
-        ptr::addr_of_mut!(text2),
-    );
-    info!("Addr of texture: {:p}", ptr::addr_of_mut!(text2));
-    let hook1 = ptr::addr_of_mut!(text2) as *mut i32;
-    info!("REAL Addr of texture: {:?}", *hook1);
-    info!("Result: {:?}", result);
-}
+//     let result = my_func(
+//         &*d3d9_ptr_real,
+//         ptr::addr_of!(filename_bytes[0]),
+//         ptr::addr_of_mut!(text2),
+//     );
+//     info!("Addr of texture: {:p}", ptr::addr_of_mut!(text2));
+//     let hook1 = ptr::addr_of_mut!(text2) as *mut i32;
+//     info!("REAL Addr of texture: {:?}", *hook1);
+//     info!("Result: {:?}", result);
+// }
 
 pub fn get_module_symbol_address(module: &str, symbol: &str) -> Option<usize> {
     let module = module

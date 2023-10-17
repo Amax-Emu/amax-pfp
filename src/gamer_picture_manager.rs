@@ -23,45 +23,6 @@ struct C_GamerPicture {
     unk4: u32,                 // 0x00, 0x00
 }
 
-
-
-use std::{
-    ffi::{c_void, CString},
-    iter,
-};
-
-
-
-use simplelog::*;
-use winapi::shared::{d3d9types::D3DCOLOR, ntdef::LPCSTR};
-use windows::Win32::Graphics::Direct3D9::IDirect3DDevice9;
-use windows::Win32::Graphics::Direct3D9::*;
-use windows::{
-    core::{HRESULT, PCSTR, PCWSTR},
-    Win32::System::SystemServices::{DLL_PROCESS_ATTACH, DLL_PROCESS_DETACH},
-    Win32::{
-        Foundation::HMODULE,
-        System::LibraryLoader::{GetModuleHandleA, GetModuleHandleW, GetProcAddress},
-    },
-};
-
-type D3DXCreateTextureFromFileExA = extern "stdcall" fn(
-    device: &IDirect3DDevice9,
-    filename: *const u8,
-    Width: u32,
-    Height: u32,
-    MipLevels: u32,
-    Usage: u32,
-    Format: D3DFORMAT,
-    Pool: D3DPOOL,
-    Filter: u32,
-    MipFilter: u32,
-    ColorKey: D3DCOLOR,
-    pSrcInfo: *mut c_void,
-    pPalette: *mut c_void,
-    ppTexture: *mut IDirect3DTexture9,
-) -> HRESULT;
-
 static_detour! {
   static GetPrimaryProfilePictureHook: unsafe extern "system" fn() -> bool;
 }
@@ -136,72 +97,61 @@ fn primary_picture_load() -> bool {
 
             if name == "GAMERPIC_0" {
                 info!("Loading primary picture");
-                //let filename = std::path::PathBuf::from("./test.bmp");
-                
 
-                // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! WORKING CODE DO NOT TOUCH
+                // WORKING CODE
 
-                // let img_data = get_image_from_url();
-
-                // let func_addr =
-                //     get_module_symbol_address("d3dx9_42.dll", "D3DXCreateTextureFromFileExA")
-                //         .expect("could not find 'D3DXCreateTextureFromFileExA' address");
-
-                // info!("D3DXCreateTextureFromFileExA addr: {}", func_addr);
-
-                // let d3d9_func: D3DXCreateTextureFromFileExA =
-                //     unsafe { std::mem::transmute(func_addr) };
-
-                // //let device = unsafe { get_d3d9_device() };
-
-                // let filename = String::from("./test4.dds");
-                // let filename_bytes = filename.as_bytes().to_owned();
-
-
-                // let start = 0x00400000 + 0x00D44EE4;
-
-                // let ptr = start as *const i32;
-                // info!("Addr of start: {:?}", start);
-                // info!("Addr of ptr1: {:p},value: {}", ptr, *ptr);
-
-                // let step2 = *ptr;
-
-                // let step3 = step2 + 0x14;
-
-                // let step4 = step3 as *const i32;
-                // info!("Addr of step4: {:p},value: {}", step4, *step4);
-                // let d3d9_ptr_real = *step4 as *mut IDirect3DDevice9;
-                // info!("Addr of d3d device_real: {:p}", d3d9_ptr_real);
-
-
-                // let result = d3d9_func(
-                //     &*d3d9_ptr_real,
-                //     ptr::addr_of!(filename_bytes[0]),
-                //     64,
-                //     64,
-                //     1,
-                //     0,
-                //     D3DFORMAT(827611204),
-                //     D3DPOOL(1),
-                //     1,
-                //     1,
-                //     0xFF000000,
-                //     ptr::null_mut(),
-                //     ptr::null_mut(),
-                //     ptr::addr_of_mut!(picture.new_texture_ptr),
-                // );
-
-                // info!("Result of D3DXCreateTextureFromFileExA: {:?}", &result);
-
-
-                // ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ WORKING CODE DO NOT TOUCH   
-
-                //let result = crate::d3d9_utils::d3d9_load_texture_from_file(picture.new_texture_ptr.clone(), &filename) ;
-                
+                //let result = crate::d3d9_utils::d3d9_load_texture_from_file(ptr::addr_of_mut!(picture.new_texture_ptr), "./test4.dds") ;
 
                 //NOTE TO SELF: CLONE DOESN'T WORK ON IDirect3DTexture9. PASS A PTR
 
-                let result = crate::d3d9_utils::d3d9_load_texture_from_file_ex(ptr::addr_of_mut!(picture.new_texture_ptr), "./test4.dds",64,64) ;
+                //let result = crate::d3d9_utils::d3d9_load_texture_from_file_ex(ptr::addr_of_mut!(picture.new_texture_ptr), "./test4.dds",64,64) ;
+
+                //let img_data = std::fs::read("./test.bmp").unwrap();
+
+                // WORKING CODE
+
+                let img_data = get_image_from_url("https://cdn.discordapp.com/avatars/925665499692544040/483eb1b92db6a449a0e2bed9a8b48bb3.png");
+
+                let result = crate::d3d9_utils::d3d9_load_texture_from_memory_ex(
+                    ptr::addr_of_mut!(picture.new_texture_ptr),
+                    img_data,
+                    64,
+                    64,
+                );
+
+                info!("Result: {:?}", result);
+
+                if result.is_err() {
+                    panic!();
+                }
+
+                picture.active = true;
+            } else if name == "GAMERPIC_1" {
+                let img_data = get_image_from_url("https://cdn.discordapp.com/avatars/418032080102883340/038d087bf299a71e7711a991d212b963.png");
+
+                let result = crate::d3d9_utils::d3d9_load_texture_from_memory_ex(
+                    ptr::addr_of_mut!(picture.new_texture_ptr),
+                    img_data,
+                    64,
+                    64,
+                );
+
+                info!("Result: {:?}", result);
+
+                if result.is_err() {
+                    panic!();
+                }
+
+                picture.active = true;
+            } else if name == "GAMERPIC_3" {
+                let img_data = get_image_from_url("https://cdn.discordapp.com/avatars/186070964977532928/b26f5a2bd1b040ed627d5b82512947ff.png");
+
+                let result = crate::d3d9_utils::d3d9_load_texture_from_memory_ex(
+                    ptr::addr_of_mut!(picture.new_texture_ptr),
+                    img_data,
+                    64,
+                    64,
+                );
 
                 info!("Result: {:?}", result);
 
@@ -222,19 +172,3 @@ fn primary_picture_load() -> bool {
 //     return result;
 
 // }
-
-
-pub fn get_module_symbol_address(module: &str, symbol: &str) -> Option<usize> {
-    let module = module
-        .encode_utf16()
-        .chain(iter::once(0))
-        .collect::<Vec<u16>>();
-    let symbol = CString::new(symbol).unwrap();
-    unsafe {
-        let handle = GetModuleHandleW(PCWSTR(module.as_ptr() as _)).unwrap();
-        match GetProcAddress(handle, PCSTR(symbol.as_ptr() as _)) {
-            Some(func) => Some(func as usize),
-            None => None,
-        }
-    }
-}
