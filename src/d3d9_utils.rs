@@ -1,11 +1,14 @@
+use std::{
+    ffi::{c_void, CString},
+    iter, ptr,
+};
 
-use std::{ffi::{c_void, CString}, ptr, iter};
 
-use windows::Win32::Graphics::Direct3D9::IDirect3DDevice9;
-use windows::Win32::Graphics::Direct3D9::*;
-use log::{info, warn, debug};
+use log::{debug, info, warn};
 use simplelog::*;
 use winapi::shared::{d3d9types::D3DCOLOR, ntdef::LPCSTR};
+use windows::Win32::Graphics::Direct3D9::IDirect3DDevice9;
+use windows::Win32::Graphics::Direct3D9::*;
 use windows::{
     core::{HRESULT, PCSTR, PCWSTR},
     Win32::System::SystemServices::{DLL_PROCESS_ATTACH, DLL_PROCESS_DETACH},
@@ -16,13 +19,13 @@ use windows::{
 };
 
 type D3DXCreateTextureFromFileA = extern "stdcall" fn(
-    device: IDirect3DDevice9,
+    device: &IDirect3DDevice9,
     filename: *const u8,
     text: *mut IDirect3DTexture9,
 ) -> HRESULT;
 
 type D3DXCreateTextureFromFileExA = extern "stdcall" fn(
-    device: IDirect3DDevice9,
+    device: &IDirect3DDevice9,
     filename: *const u8,
     Width: u32,
     Height: u32,
@@ -39,14 +42,14 @@ type D3DXCreateTextureFromFileExA = extern "stdcall" fn(
 ) -> HRESULT;
 
 type D3DXCreateTextureFromFileInMemory = extern "stdcall" fn(
-    pDevice: IDirect3DDevice9,
+    pDevice: &IDirect3DDevice9,
     pSrcData: *mut Vec<u8>,
     SrcDataSize: usize,
     ppTexture: *mut IDirect3DTexture9,
 ) -> HRESULT;
 
 type D3DXCreateTextureFromFileInMemoryEx = extern "stdcall" fn(
-    device: IDirect3DDevice9,
+    device: &IDirect3DDevice9,
     pSrcData: *mut Vec<u8>,
     SrcDataSize: usize,
     Width: u32,
@@ -63,10 +66,7 @@ type D3DXCreateTextureFromFileInMemoryEx = extern "stdcall" fn(
     ppTexture: *mut IDirect3DTexture9,
 ) -> HRESULT;
 
-
-
 pub unsafe fn get_d3d9_device() -> *mut IDirect3DDevice9 {
-
     let start = crate::EXE_BASE_ADDR + 0x00D44EE4;
 
     let ptr = start as *const i32;
@@ -89,27 +89,112 @@ pub unsafe fn get_d3d9_device() -> *mut IDirect3DDevice9 {
     info!("Addr of d3d device: {:p}", d3d9_ptr_real);
 
     return d3d9_ptr_real;
-
 }
 
-pub fn d3d9_load_texture_from_file(device: *mut IDirect3DDevice9, mut texture: IDirect3DTexture9, file_path: &std::path::Path) -> Result<(),()> {
-
+pub fn d3d9_load_texture_from_file(
+    texture_ptr: *mut IDirect3DTexture9,
+    file_path: &str,
+) -> Result<(), ()> {
     // let filename = String::from("./test4.dds");
     // let filename_bytes = filename.as_bytes().to_owned();
 
-    let func_addr =
-    get_module_symbol_address("d3dx9_42.dll", "D3DXCreateTextureFromFileA")
+    let device = unsafe { get_d3d9_device() };
+
+    let func_addr = get_module_symbol_address("d3dx9_42.dll", "D3DXCreateTextureFromFileA")
         .expect("could not find 'D3DXCreateTextureFromFileA' address");
 
     let d3d9_func: D3DXCreateTextureFromFileA = unsafe { std::mem::transmute(func_addr) };
 
-    let filename = String::from(file_path.to_str().unwrap());
+    let filename = String::from(file_path);
     let filename_bytes = filename.as_bytes().to_owned();
     unsafe {
+        let result = d3d9_func(
+            &*device,
+            ptr::addr_of!(filename_bytes[0]),
+            texture_ptr,
+        );
+
+        info!("Result of D3DXCreateTextureFromFileA: {:?}", &result);
+
+        if result.is_ok() {
+            Ok(())
+        } else {
+            Err(())
+        }
+    }
+}
+
+pub fn d3d9_load_texture_from_file_ex(
+    texture_ptr: *mut IDirect3DTexture9,
+    file_path: &str, //I'll change it to path, promise
+    width: u32,
+    height: u32,
+) -> Result<(), ()> {
+    let func_addr = get_module_symbol_address("d3dx9_42.dll", "D3DXCreateTextureFromFileExA")
+        .expect("could not find 'D3DXCreateTextureFromFileExA' address");
+    info!("D3DXCreateTextureFromFileExA addr: {}",func_addr);
+    let d3d9_func: D3DXCreateTextureFromFileExA = unsafe { std::mem::transmute(func_addr) };
+
+    let device = unsafe { get_d3d9_device() };
+
+    let filename = String::from(file_path);
+    let filename_bytes = filename.as_bytes().to_owned();
+
+    unsafe {
+        let result = d3d9_func(
+            &*device,
+            ptr::addr_of!(filename_bytes[0]),
+            width,
+            height,
+            1,
+            0,
+            D3DFORMAT(827611204),
+            D3DPOOL(1),
+            1,
+            1,
+            0xFF000000,
+            ptr::null_mut(),
+            ptr::null_mut(),
+            texture_ptr,
+        );
+
+        info!("Result of D3DXCreateTextureFromFileExA: {:?}", &result);
+
+        if result.is_ok() {
+            Ok(())
+        } else {
+            Err(())
+        }
+    }
+}
+
+pub fn d3d9_load_texture_from_memory_ex(texture_ptr: *mut IDirect3DTexture9, mut tex_buffer: Vec<u8>,width:u32,height:u32) -> Result<(),()> {
+
+    let func_addr = get_module_symbol_address(
+        "d3dx9_42.dll",
+        "D3DXCreateTextureFromFileInMemoryEx",
+    )
+    .expect("could not find 'D3DXCreateTextureFromFileInMemoryEx' address");
+
+    let d3d9_func: D3DXCreateTextureFromFileInMemoryEx = unsafe { std::mem::transmute(func_addr) };
+    let device = unsafe { get_d3d9_device() };
+    unsafe {
     let result = d3d9_func(
-        *device,
-        ptr::addr_of!(filename_bytes[0]),
-        ptr::addr_of_mut!(texture),
+        &*device,
+        ptr::addr_of_mut!(tex_buffer),
+        tex_buffer.len(),
+        width,
+        height,
+        1,
+        0,
+        D3DFORMAT(827611204),
+        D3DPOOL(1),
+        1,
+        1,
+        0xFF000000,
+        ptr::null_mut(),
+        ptr::null_mut(),
+        texture_ptr,
     );
 
     if result.is_ok() {
@@ -117,84 +202,9 @@ pub fn d3d9_load_texture_from_file(device: *mut IDirect3DDevice9, mut texture: I
     } else {
         Err(())
     }
-
-    }
-
-
-
 }
 
-// pub fn d3d9_load_texture_from_file_ex(device: *mut IDirect3DDevice9, texture: IDirect3DTexture9, file_path: &std::path::Path,width:u32,height:u32) -> Result<(),()> {
-
-//     let func_addr = get_module_symbol_address("d3dx9_42.dll", "D3DXCreateTextureFromFileExA")
-//         .expect("could not find 'D3DXCreateTextureFromFileExA' address");
-
-//     let d3d9_func: D3DXCreateTextureFromFileExA = unsafe { std::mem::transmute(func_addr) };
-    
-//     let filename = String::from(file_path.to_str().unwrap());
-//     let filename_bytes = filename.as_bytes().to_owned();
-    
-//     unsafe {
-//     let result = d3d9_func(
-//         *device,
-//         ptr::addr_of!(filename_bytes[0]),
-//         width,
-//         height,
-//         1,
-//         0,
-//         D3DFORMAT(827611204),
-//         D3DPOOL(1),
-//         1,
-//         1,
-//         0xFF000000,
-//         ptr::null_mut(),
-//         ptr::null_mut(),
-//         ptr::addr_of_mut!(texture),
-//     );
-//     }
-//     if result.is_ok() {
-//         Ok(())
-//     } else {
-//         Err(())
-//     }
-
-// }
-
-// pub fn d3d9_load_texture_from_memory_ex(device: IDirect3DDevice9, texture: IDirect3DTexture9, file_path: std::path::Path,width:u32,height:u32) -> Result<(),()> {
-
-//     let func_addr = get_module_symbol_address(
-//         "d3dx9_42.dll",
-//         "D3DXCreateTextureFromFileInMemoryEx",
-//     )
-//     .expect("could not find 'D3DXCreateTextureFromFileInMemoryEx' address");
-
-//     let d3d9_func: D3DXCreateTextureFromFileInMemoryEx = unsafe { std::mem::transmute(func_addr) };
-
-//     let result = d3d9_func(
-//         &device,
-//         ptr::addr_of_mut!(file_path),
-//         0,
-//         width,
-//         height,
-//         1,
-//         0,
-//         D3DFORMAT(827611204),
-//         D3DPOOL(1),
-//         1,
-//         1,
-//         0xFF000000,
-//         ptr::null_mut(),
-//         ptr::null_mut(),
-//         ptr::addr_of_mut!(texture),
-//     );
-
-//     if result.is_ok() {
-//         Ok(())
-//     } else {
-//         Err(())
-//     }
-
-// }
+}
 
 unsafe fn legacy_create_texture() {
     let mut new_gpu: *mut IDirect3DDevice9 = ptr::null_mut();
@@ -221,7 +231,6 @@ unsafe fn legacy_create_texture() {
     let d3d9_ptr_real = *step4 as *mut IDirect3DDevice9;
     info!("Addr of d3d device_real: {:p}", d3d9_ptr_real);
 
-
     let d3d9_ptr = step3 as *mut IDirect3DDevice9;
     info!("Addr of d3d device: {:p}", d3d9_ptr);
 
@@ -240,9 +249,8 @@ unsafe fn legacy_create_texture() {
     );
     info!("Result: {:?}", result);
 
-    let address =
-        get_module_symbol_address("d3dx9_42.dll", "D3DXCreateTextureFromFileA")
-            .expect("could not find 'D3DXCreateTextureFromFileA' address");
+    let address = get_module_symbol_address("d3dx9_42.dll", "D3DXCreateTextureFromFileA")
+        .expect("could not find 'D3DXCreateTextureFromFileA' address");
     info!("Addr of D3DXCreateTextureFromFileA: {}", address);
 
     let filename = String::from("./test.bmp");
@@ -267,7 +275,6 @@ unsafe fn legacy_create_texture() {
     info!("REAL Addr of texture: {:?}", *hook1);
     info!("Result: {:?}", result);
 }
-
 
 pub fn get_module_symbol_address(module: &str, symbol: &str) -> Option<usize> {
     let module = module
