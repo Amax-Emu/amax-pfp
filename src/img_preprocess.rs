@@ -1,5 +1,5 @@
 use std::io::Read;
-use image::{GenericImage, GenericImageView, ImageBuffer, RgbImage, imageops::FilterType::Lanczos3, codecs::bmp, ImageOutputFormat, ImageFormat};
+use image::{imageops::FilterType::Lanczos3, ImageOutputFormat};
 use log::info;
 use std::io::Cursor;
 

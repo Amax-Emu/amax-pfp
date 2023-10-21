@@ -8,17 +8,17 @@ use windows::Win32::Graphics::Direct3D9::IDirect3DTexture9;
 #[repr(C)]
 struct C_GamerPicture {
     //total size on pc: 80
-    unk0: u32, //0x4C 0xA8, 0xEA, 0x00,
+    unk_ptr0: u32, //0x4C 0xA8, 0xEA, 0x00,
     small_unk0: u8,
-    Ref_aka_pad_id: u8,                 //0x00
-    UserInformation: [u8; 18], // 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x0C, 0x00, 0x00, 0x00
+    reference_pad_id: u8,                 //0x00
+    user_information: [u8; 18], // 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x0C, 0x00, 0x00, 0x00
     active: bool,              // 0x00
     free: bool,                // 0x01
-    GamerPicName: [u8; 30],    //GAMERPIC_X or REMOTE_GAMERPIC_X
+    gamer_pic_name: [u8; 30],    //GAMERPIC_X or REMOTE_GAMERPIC_X
     size_as_big_end_temp: u32, // 0x00, 0x00, 0x00, 0x00
     unk_zeroes: u32,           // 0x00, 0x40 0x00, 0x00,
     unk_4_as_u16: u16,         //0x04, 0x00,
-    new_texture_ptr: IDirect3DTexture9, //0xE0, 0x71 0x90, 0x14
+    texture_ptr: IDirect3DTexture9, //0xE0, 0x71 0x90, 0x14
     default_texture_ptr: u32,  //   0xB0, 0xCB 0x40, 0x0F
     unk4: u32,                 // 0x00, 0x00
 }
@@ -64,8 +64,7 @@ fn manager_create(
 unsafe fn get_local_gamerpic() -> *mut [C_GamerPicture; 4] {
     //todo: rework pointer, this one is not very stable
 
-    let exe_base_addr = 0x00400000;
-    let local_start = exe_base_addr + 0x00D61518;
+    let local_start = crate::EXE_BASE_ADDR + 0x00D61518;
     info!("Addr of start: {:?}", local_start);
 
     let ptr = local_start as *const i32;
@@ -92,7 +91,7 @@ fn primary_picture_load() -> bool {
                 ptr::addr_of!(picture),
                 picture
             );
-            let mut name = pretty_name(&picture.GamerPicName);
+            let name = pretty_name(&picture.gamer_pic_name);
             info!("{}", &name);
 
             if name == "GAMERPIC_0" {
@@ -100,11 +99,11 @@ fn primary_picture_load() -> bool {
 
                 // WORKING CODE
 
-                //let result = crate::d3d9_utils::d3d9_load_texture_from_file(ptr::addr_of_mut!(picture.new_texture_ptr), "./test4.dds") ;
+                //let result = crate::d3d9_utils::d3d9_load_texture_from_file(ptr::addr_of_mut!(picture.texture_ptr), "./test4.dds") ;
 
                 //NOTE TO SELF: CLONE DOESN'T WORK ON IDirect3DTexture9. PASS A PTR
 
-                //let result = crate::d3d9_utils::d3d9_load_texture_from_file_ex(ptr::addr_of_mut!(picture.new_texture_ptr), "./test4.dds",64,64) ;
+                //let result = crate::d3d9_utils::d3d9_load_texture_from_file_ex(ptr::addr_of_mut!(picture.texture_ptr), "./test4.dds",64,64) ;
 
                 //let img_data = std::fs::read("./test.bmp").unwrap();
 
@@ -113,7 +112,7 @@ fn primary_picture_load() -> bool {
                 let img_data = get_image_from_url("https://cdn.discordapp.com/avatars/925665499692544040/483eb1b92db6a449a0e2bed9a8b48bb3.png");
 
                 let result = crate::d3d9_utils::d3d9_load_texture_from_memory_ex(
-                    ptr::addr_of_mut!(picture.new_texture_ptr),
+                    ptr::addr_of_mut!(picture.texture_ptr),
                     img_data,
                     64,
                     64,
@@ -130,7 +129,7 @@ fn primary_picture_load() -> bool {
                 let img_data = get_image_from_url("https://cdn.discordapp.com/avatars/418032080102883340/038d087bf299a71e7711a991d212b963.png");
 
                 let result = crate::d3d9_utils::d3d9_load_texture_from_memory_ex(
-                    ptr::addr_of_mut!(picture.new_texture_ptr),
+                    ptr::addr_of_mut!(picture.texture_ptr),
                     img_data,
                     64,
                     64,
@@ -147,7 +146,7 @@ fn primary_picture_load() -> bool {
                 let img_data = get_image_from_url("https://cdn.discordapp.com/avatars/186070964977532928/b26f5a2bd1b040ed627d5b82512947ff.png");
 
                 let result = crate::d3d9_utils::d3d9_load_texture_from_memory_ex(
-                    ptr::addr_of_mut!(picture.new_texture_ptr),
+                    ptr::addr_of_mut!(picture.texture_ptr),
                     img_data,
                     64,
                     64,

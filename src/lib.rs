@@ -1,32 +1,26 @@
-use std::io::Read;
-
 use std::{
-    ffi::{c_void, CString},
-    iter, mem, ptr,
+    ffi::{c_void}
 };
 
 use log::info;
 use simplelog::*;
 
 use windows::{
-    core::{HRESULT, PCSTR, PCWSTR},
+    core::{PCSTR},
     Win32::System::SystemServices::{DLL_PROCESS_ATTACH, DLL_PROCESS_DETACH},
     Win32::{
         Foundation::HMODULE,
-        System::LibraryLoader::{GetModuleHandleA, GetModuleHandleW, GetProcAddress},
+        System::LibraryLoader::{GetModuleHandleA},
     },
 };
 
 mod d3d9_utils;
-//mod img_preprocess;
 mod gamer_picture_manager;
 mod img_preprocess;
 
 pub static EXE_BASE_ADDR: i32 = 0x00400000;
 
 use crate::gamer_picture_manager::*;
-
-/// Called when the DLL is attached to the process.
 
 /*
 00000040 A8 EA 00 00:00 00 00 00|00 00 00 00:00 00 00 00

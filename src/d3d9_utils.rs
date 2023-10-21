@@ -6,7 +6,7 @@ use std::{
 
 use log::{debug, info, warn};
 use simplelog::*;
-use winapi::shared::{d3d9types::D3DCOLOR, ntdef::LPCSTR};
+use winapi::shared::d3d9types::D3DCOLOR;
 use windows::Win32::Graphics::Direct3D9::IDirect3DDevice9;
 use windows::Win32::Graphics::Direct3D9::*;
 use windows::{
