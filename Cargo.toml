@@ -10,6 +10,12 @@ edition = "2021"
 name = "amax_pfp"
 crate-type = ["cdylib"]
 
+#[source.crates-io]
+#replace-with = "vendored-sources"
+
+#[source.vendored-sources]
+#directory = "vendor"
+
 [dependencies]
 log = "0.4.20"
 retour = { version = "0.3", features = ["static-detour"] }
@@ -20,4 +26,6 @@ winapi = { version = "0.3", features = ["winuser","d3d9","d3d9types","d3dcommon"
 
 ureq = "2.8.0"
 image = { version = "0.24.7", features = ["png","dds","bmp"] }
+known-folders = "1.0.1"
+anyhow = "1.0.75"
 
