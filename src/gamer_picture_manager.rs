@@ -7,9 +7,30 @@ use retour::static_detour;
 use std::{collections::HashMap, fs, io, mem, ptr, str::Utf8Error};
 use windows::Win32::Graphics::Direct3D9::IDirect3DTexture9;
 
+
+pub static GAMER_PICTURE_MANAGER: i32 = 0x011a89c8; 
+/*
+Due to how memory in Blur works there are some static locations in memory, that contain pointers to some structures.
+This one points to GAMER_PICTURE_MANAGER, which is great.
+*/
+
+
 //static URL_BASE: String = String::from("https://amax-emu.com/api");
 
 //static PFP_CACHE: HashMap<String, Vec<u8>> = Lazy::new(||HashMap::new());
+
+#[derive(Debug,Clone,Copy)]
+#[repr(C)]
+struct GamerPictureManager{
+    thread: [u8; 20], // C8 AA EA 00 00 00 00 00 00 00 00 00 0D F0 AD BA 0D F0 AD BA || This is a thread pointer at PS3. I don't know what is it on PC.
+    local_pictures_ptr: *const [*mut C_GamerPicture;4],
+    local_pictures_size: usize,
+    local_pictures_len: usize, //this one is used in GetTotalPicturesFunctions
+    remote_pictures_ptr: *const [*mut C_GamerPicture;19], //hardcoding to 19
+    remote_pictures_size: usize, // Has value of 26. Bug? Cut feature? We will never know.
+    remoter_pictures_len: usize, //this one is used in GetTotalPicturesFunctions
+}
+
 
 #[derive(Debug)]
 #[repr(C)]
@@ -88,18 +109,15 @@ fn manager_create(
     return true;
 }
 
-unsafe fn get_local_gamerpic() -> *mut [C_GamerPicture; 4] {
-    //todo: rework pointer, this one is not very stable
-
-    let local_start = crate::EXE_BASE_ADDR + 0x00D61518;
+unsafe fn get_gamer_picture_manager() -> GamerPictureManager {
+    let local_start = GAMER_PICTURE_MANAGER;
     info!("Addr of start: {:?}", local_start);
 
     let ptr = local_start as *const i32;
-
-    let ptr = *ptr as *mut [C_GamerPicture; 4];
-    info!("Addr of start: {:?}", local_start);
-    info!("Addr of local pictures ptr: {:p}", &ptr);
-    return ptr;
+    let ptr = *ptr as *mut GamerPictureManager;
+    info!("Addr of GamerPictureManager ptr: {:p}", &ptr);
+    let gpm = *ptr;
+    return gpm;
 }
 
 fn pretty_name(name_buf: &[u8]) -> String {
@@ -110,16 +128,17 @@ fn pretty_name(name_buf: &[u8]) -> String {
 fn primary_picture_load() -> bool {
     info!("GetPrimaryProfilePicture hook");
     unsafe {
-        let local_gamerpics = get_local_gamerpic();
 
-        for picture in &mut *local_gamerpics {
+        let gamer_picture_manager = get_gamer_picture_manager();
+
+        for picture in *gamer_picture_manager.local_pictures_ptr {
             info!(
                 "Addr of picture: {:p} Data: {:?}",
                 ptr::addr_of!(picture),
                 picture
             );
 
-            let name = pretty_name(&picture.gamer_pic_name);
+            let name = pretty_name(&(*picture).gamer_pic_name);
             info!("Processing {}", &name);
 
             //TODO: map gamerpics to (fx)hashmap to speedup?
@@ -161,7 +180,7 @@ fn primary_picture_load() -> bool {
                 };
 
                 let result = crate::d3d9_utils::d3d9_load_texture_from_memory_ex(
-                    ptr::addr_of_mut!(picture.texture_ptr),
+                    ptr::addr_of_mut!((*picture).texture_ptr),
                     img_data,
                     64,
                     64,
@@ -173,33 +192,13 @@ fn primary_picture_load() -> bool {
                     panic!();
                 }
 
-                picture.active = true;
+                (*picture).active = true;
             }
         }
     }
 
     return false;
 }
-
-// fn fill_gamerpic_texture_from_file(texture: IDirect3DTexture9,img_file_path: std::path::Path) -> Result<(),()> {
-
-//     return result;
-
-// }
-
-// pub fn create_local_pfp(name: impl AsRef<Path>) -> Result<File, io::Error> {
-// 	let dir = known_folders::get_known_folder_path(known_folders::KnownFolder::RoamingAppData)
-// 		.ok_or_else(|| io::Error::other("Couldn't get %APPDATA%/Roaming as a KnownFolder"))?
-// 		.join("bizarre creations")
-// 		.join("blur")
-// 		.join("amax")
-// 		.join("log");
-// 	if !&dir.is_dir() {
-// 		fs::create_dir_all(&dir)?;
-// 	}
-// 	let log_file = dir.join(name);
-// 	File::create(log_file)
-// }
 
 //Yes, we gonna copy-paste same code for retreiving username from project to project, why are you asking?
 pub fn get_saved_profile_username() -> Result<String, Utf8Error> {

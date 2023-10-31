@@ -17,10 +17,11 @@ use windows::{
 mod d3d9_utils;
 mod gamer_picture_manager;
 mod img_preprocess;
+use crate::gamer_picture_manager::*;
 
 pub static EXE_BASE_ADDR: i32 = 0x00400000;
 
-use crate::gamer_picture_manager::*;
+
 
 /*
 00000040 A8 EA 00 00:00 00 00 00|00 00 00 00:00 00 00 00
@@ -85,6 +86,7 @@ pub fn init(module: HMODULE) {
 
     unsafe {
         create_get_primary_profile_picture_hook();
+        create_request_remote_picture_game_hook();
     }
 
     let _ptr_base: *mut c_void = unsafe { GetModuleHandleA(PCSTR::null()) }.unwrap().0 as _;
