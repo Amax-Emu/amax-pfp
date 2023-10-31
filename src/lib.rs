@@ -86,7 +86,8 @@ pub fn init(module: HMODULE) {
 
     unsafe {
         create_get_primary_profile_picture_hook();
-        create_request_remote_picture_game_hook();
+        create_wipe_remote_pictures_hook();
+        //create_request_remote_picture_game_hook();
     }
 
     let _ptr_base: *mut c_void = unsafe { GetModuleHandleA(PCSTR::null()) }.unwrap().0 as _;

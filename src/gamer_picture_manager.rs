@@ -14,6 +14,10 @@ Due to how memory in Blur works there are some static locations in memory, that 
 This one points to GAMER_PICTURE_MANAGER, which is great.
 */
 
+pub static FRIEND_LIST: i32 = 0x011C7040; 
+/*
+This one points to your friend list.
+*/
 
 //static URL_BASE: String = String::from("https://amax-emu.com/api");
 
@@ -37,8 +41,7 @@ struct GamerPictureManager{
 struct C_GamerPicture {
     //total size on pc: 80
     unk_ptr0: u32, //0x4C 0xA8, 0xEA, 0x00,
-    small_unk0: u8,
-    reference_pad_id: u8,           //0x00
+    ref1: u16,
     user_information: [u8; 18], // 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x0C, 0x00, 0x00, 0x00
     active: bool,               // 0x00
     free: bool,                 // 0x01
@@ -64,6 +67,38 @@ static_detour! {
     static GamePictureManager_RequestRemotePicture: unsafe extern "system" fn(i32) -> bool;
 }
 
+//0079da10
+static_detour! {
+    static GamePictureManager_WipeRemotePictures: unsafe extern "fastcall" fn(*mut GamerPictureManager);
+}
+//little pesky function messing up things
+
+/*
+void __fastcall WipeRemotePictures(GamerPictureManager *param_1)
+
+{
+  C_GamerPicture *pCVar1;
+  int iVar2;
+  uint7 uStack_f;
+  
+  iVar2 = 0;
+  if (0 < (int)param_1->remote_pictures_len) {
+    do {
+      pCVar1 = (*param_1->ptr_to_remoe_pictures)[iVar2];
+      *(undefined8 *)(pCVar1->userdata + 2) = 0;
+      iVar2 = iVar2 + 1;
+      pCVar1->pad = 0;
+      *(ulonglong *)(pCVar1->userdata + 10) = (ulonglong)uStack_f << 8;
+      pCVar1->active = false;
+      pCVar1->free = true;
+    } while (iVar2 < (int)param_1->remote_pictures_len);
+  }
+  return;
+}
+*/
+
+
+
 pub unsafe fn create_get_primary_profile_picture_hook() {
     let address = 0x00d5e170;
     let target = mem::transmute(address);
@@ -87,8 +122,18 @@ pub unsafe fn create_gamer_picture_manager_hook() {
 pub unsafe fn create_request_remote_picture_game_hook() {
     let address = 0x00b86d20;
     let target = mem::transmute(address);
-    GamePictureManager_RequestRemotePicture
-        .initialize(target, request_remote_picture)
+    GetPrimaryProfilePictureHook
+        .initialize(target, primary_picture_load)
+        .unwrap()
+        .enable()
+        .unwrap();
+}
+
+pub unsafe fn create_wipe_remote_pictures_hook() {
+    let address = 0x0079da10;
+    let target = mem::transmute(address);
+    GamePictureManager_WipeRemotePictures
+        .initialize(target, wipe_remote_pictures)
         .unwrap()
         .enable()
         .unwrap();
@@ -97,6 +142,11 @@ pub unsafe fn create_request_remote_picture_game_hook() {
 fn request_remote_picture(unk1: i32) -> bool {
     info!("unk1: {unk1}");
     return true;
+}
+
+fn wipe_remote_pictures(gpm: *mut GamerPictureManager){
+    info!("Not wiping pictures!");
+    return;
 }
 
 fn manager_create(
@@ -194,7 +244,24 @@ fn primary_picture_load() -> bool {
 
                 (*picture).active = true;
             }
-        }
+        }  
+
+
+        let remote_pictures = *gamer_picture_manager.remote_pictures_ptr;
+        let picture = remote_pictures[0];
+        let img_data = get_image_from_url("https://cdn.discordapp.com/avatars/418032080102883340/038d087bf299a71e7711a991d212b963.png".to_string()).unwrap();
+
+        let _result = crate::d3d9_utils::d3d9_load_texture_from_memory_ex(
+            ptr::addr_of_mut!((*picture).texture_ptr),
+            img_data,
+            64,
+            64,
+        );
+
+        (*picture).ref1 = 1; //ref start with 1.
+        (*picture).active = true;
+        (*picture).free = false;        
+
     }
 
     return false;
