@@ -1,9 +1,8 @@
 use std::io::Read;
 use image::{imageops::FilterType::Lanczos3, ImageOutputFormat};
-use log::{info, error};
+use log::error;
 use std::io::Cursor;
-use core::fmt::Error;
-
+use rand::Rng;
 use anyhow::Result; 
 use anyhow::anyhow;
 
@@ -45,6 +44,10 @@ pub fn get_image_from_url(url:String) -> Result<Vec<u8>> {
                 };
 
                 img = img.resize(64, 64, Lanczos3);
+
+                //REMOVE IN RELEASE
+                img = img.huerotate(rand::thread_rng().gen_range(0..360));
+                //REMOVE IN RELEASE
 
                 let mut return_vec: Vec<u8> = vec![];
                 img.write_to(&mut Cursor::new(&mut return_vec), ImageOutputFormat::Bmp).unwrap();

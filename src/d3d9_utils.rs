@@ -2,20 +2,13 @@ use std::{
     ffi::{c_void, CString},
     iter, ptr,
 };
-
-
 use log::{debug, info, warn};
-use simplelog::*;
 use winapi::shared::d3d9types::D3DCOLOR;
 use windows::Win32::Graphics::Direct3D9::IDirect3DDevice9;
 use windows::Win32::Graphics::Direct3D9::*;
 use windows::{
     core::{HRESULT, PCSTR, PCWSTR},
-    Win32::System::SystemServices::{DLL_PROCESS_ATTACH, DLL_PROCESS_DETACH},
-    Win32::{
-        Foundation::HMODULE,
-        System::LibraryLoader::{GetModuleHandleA, GetModuleHandleW, GetProcAddress},
-    },
+    Win32::System::LibraryLoader::{GetModuleHandleW, GetProcAddress},
 };
 
 type D3DXCreateTextureFromFileA = extern "stdcall" fn(

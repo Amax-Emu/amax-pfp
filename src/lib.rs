@@ -1,17 +1,10 @@
-use std::{
-    ffi::{c_void}
-};
-
-use log::info;
+use std::ffi::c_void;
 use simplelog::*;
 
 use windows::{
-    core::{PCSTR},
+    core::PCSTR,
     Win32::System::SystemServices::{DLL_PROCESS_ATTACH, DLL_PROCESS_DETACH},
-    Win32::{
-        Foundation::HMODULE,
-        System::LibraryLoader::{GetModuleHandleA},
-    },
+    Win32::{Foundation::HMODULE, System::LibraryLoader::GetModuleHandleA},
 };
 
 mod d3d9_utils;
@@ -20,8 +13,6 @@ mod img_preprocess;
 use crate::gamer_picture_manager::*;
 
 pub static EXE_BASE_ADDR: i32 = 0x00400000;
-
-
 
 /*
 00000040 A8 EA 00 00:00 00 00 00|00 00 00 00:00 00 00 00
@@ -86,9 +77,13 @@ pub fn init(module: HMODULE) {
 
     unsafe {
         create_get_primary_profile_picture_hook();
-        create_wipe_remote_pictures_hook();
+        //create_wipe_remote_pictures_hook();
         //create_request_remote_picture_game_hook();
-    }
+
+        std::thread::spawn(|| {
+            gamer_picture_manager::remote_pfp_updater();
+        });
+    };
 
     let _ptr_base: *mut c_void = unsafe { GetModuleHandleA(PCSTR::null()) }.unwrap().0 as _;
 }
