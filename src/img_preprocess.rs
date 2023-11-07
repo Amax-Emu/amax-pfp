@@ -46,7 +46,7 @@ pub fn get_image_from_url(url:String) -> Result<Vec<u8>> {
                 img = img.resize(64, 64, Lanczos3);
 
                 //REMOVE IN RELEASE
-                img = img.huerotate(rand::thread_rng().gen_range(0..360));
+                //img = img.huerotate(rand::thread_rng().gen_range(0..360));
                 //REMOVE IN RELEASE
 
                 let mut return_vec: Vec<u8> = vec![];

@@ -324,11 +324,11 @@ fn get_primary_profile_pic(username: &str) -> Result<Vec<u8>> {
 }
 
 fn get_pfp_via_http_for_username(username: &str) -> Result<Vec<u8>> {
-    //let url_base = String::from("https://amax-emu.com/api");
-
-    //let user_pfp_url = format!("{url_base}/profile/{username}/pfp.png");
+    let url_base = String::from("https://amax-emu.com/api");
+    let user_pfp_url = format!("{url_base}/players/pfp/name/{username}");
+    
     //let user_pfp_url = String::from("https://cdn.discordapp.com/avatars/925665499692544040/483eb1b92db6a449a0e2bed9a8b48bb3.png");
-    let user_pfp_url = "https://cs.amax-emu.com/amax_logo.png".to_string();
+    //let user_pfp_url = "https://cs.amax-emu.com/amax_logo.png".to_string();
     //^ A huge veriety of options for Strings creating! Crazy!
 
 
@@ -397,7 +397,11 @@ pub unsafe fn remote_pfp_updater() {
                 img_data = pfp_cache.get(&player.user_dw_id).unwrap().clone();
             } else {
                 //todo: finish block for url fetch.
-                match get_image_from_url("https://cs.amax-emu.com/amax_logo.png".to_string()) {
+
+                let url_base = String::from("https://amax-emu.com/api");
+                let user_pfp_url = format!("{url_base}/players/pfp/name/{pretty_name}");
+
+                match get_image_from_url(user_pfp_url) {
                     Ok(img_data_url) => {
                         img_data = img_data_url.clone();
                         pfp_cache.insert(player.user_dw_id, img_data_url.clone());
