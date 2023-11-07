@@ -11,10 +11,21 @@ pub fn get_image_from_url(url:String) -> Result<Vec<u8>> {
                 let resp = match ureq::get(&url)
                 .call() {
                     Ok(resp) => resp,
-                    Err(e) => {
-                        error!("Failed to make HTTP request: {e}");
-                        return Err(anyhow!("Failed to make HTTP request"));
-                    },
+                    Err(e) => { error!("Failed to make HTTP request: {e}");
+                    
+                    let resp = match ureq::get("https://cs.amax-emu.com/amax_logo.png")
+                    .call() {
+                        Ok(resp) => resp,
+                        Err(e) => {
+                            error!("Failed to make HTTP request: {e}");
+                            return Err(anyhow!("Failed to make HTTP request"));
+                        },
+                    };
+                    
+                    resp
+                
+                
+                }
                 };
 
                 let len = match resp
