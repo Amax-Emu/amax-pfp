@@ -1,8 +1,8 @@
+use log::{debug, info, warn};
 use std::{
     ffi::{c_void, CString},
     iter, ptr,
 };
-use log::{debug, info, warn};
 use winapi::shared::d3d9types::D3DCOLOR;
 use windows::Win32::Graphics::Direct3D9::IDirect3DDevice9;
 use windows::Win32::Graphics::Direct3D9::*;
@@ -101,11 +101,7 @@ pub fn d3d9_load_texture_from_file(
     let filename = String::from(file_path);
     let filename_bytes = filename.as_bytes().to_owned();
     unsafe {
-        let result = d3d9_func(
-            &*device,
-            ptr::addr_of!(filename_bytes[0]),
-            texture_ptr,
-        );
+        let result = d3d9_func(&*device, ptr::addr_of!(filename_bytes[0]), texture_ptr);
 
         debug!("Result of D3DXCreateTextureFromFileA: {:?}", &result);
 
@@ -125,7 +121,7 @@ pub fn d3d9_load_texture_from_file_ex(
 ) -> Result<(), ()> {
     let func_addr = get_module_symbol_address("d3dx9_42.dll", "D3DXCreateTextureFromFileExA")
         .expect("could not find 'D3DXCreateTextureFromFileExA' address");
-    info!("D3DXCreateTextureFromFileExA addr: {}",func_addr);
+    info!("D3DXCreateTextureFromFileExA addr: {}", func_addr);
     let d3d9_func: D3DXCreateTextureFromFileExA = unsafe { std::mem::transmute(func_addr) };
 
     let device = unsafe { get_d3d9_device() };
@@ -161,44 +157,48 @@ pub fn d3d9_load_texture_from_file_ex(
     }
 }
 
-pub fn d3d9_load_texture_from_memory_ex(texture_ptr: *mut IDirect3DTexture9, mut tex_buffer: Vec<u8>,width:u32,height:u32) -> Result<(),()> {
-
-    let func_addr = get_module_symbol_address(
-        "d3dx9_42.dll",
-        "D3DXCreateTextureFromFileInMemoryEx",
-    )
-    .expect("could not find 'D3DXCreateTextureFromFileInMemoryEx' address");
+pub fn d3d9_load_texture_from_memory_ex(
+    texture_ptr: *mut IDirect3DTexture9,
+    mut tex_buffer: Vec<u8>,
+    width: u32,
+    height: u32,
+) -> Result<(), ()> {
+    let func_addr =
+        get_module_symbol_address("d3dx9_42.dll", "D3DXCreateTextureFromFileInMemoryEx")
+            .expect("could not find 'D3DXCreateTextureFromFileInMemoryEx' address");
 
     let d3d9_func: D3DXCreateTextureFromFileInMemoryEx = unsafe { std::mem::transmute(func_addr) };
     let device = unsafe { get_d3d9_device() };
     unsafe {
-    let result = d3d9_func(
-        &*device,
-        ptr::addr_of_mut!(tex_buffer[0]), //todo: fix this
-        tex_buffer.len(),
-        width,
-        height,
-        1,
-        0,
-        D3DFORMAT(20),
-        D3DPOOL(1),
-        1,
-        1,
-        0xFF000000,
-        ptr::null_mut(),
-        ptr::null_mut(),
-        texture_ptr,
-    );
+        let result = d3d9_func(
+            &*device,
+            ptr::addr_of_mut!(tex_buffer[0]), //todo: fix this
+            tex_buffer.len(),
+            width,
+            height,
+            1,
+            0,
+            D3DFORMAT(20),
+            D3DPOOL(1),
+            1,
+            1,
+            0xFF000000,
+            ptr::null_mut(),
+            ptr::null_mut(),
+            texture_ptr,
+        );
 
-    debug!("Result of D3DXCreateTextureFromFileInMemoryEx: {:?}", &result);
+        debug!(
+            "Result of D3DXCreateTextureFromFileInMemoryEx: {:?}",
+            &result
+        );
 
-    if result.is_ok() {
-        Ok(())
-    } else {
-        Err(())
+        if result.is_ok() {
+            Ok(())
+        } else {
+            Err(())
+        }
     }
-}
-
 }
 
 // unsafe fn legacy_create_texture() {

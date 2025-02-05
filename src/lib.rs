@@ -1,5 +1,5 @@
-use std::ffi::c_void;
 use simplelog::*;
+use std::ffi::c_void;
 
 use windows::{
     core::PCSTR,

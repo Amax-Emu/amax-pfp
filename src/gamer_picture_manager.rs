@@ -405,9 +405,7 @@ pub unsafe fn remote_pfp_updater() {
                 (*picture).free = false;
 
                 let _res = trigger_lobby_update();
-
             } else {
-
                 let url_base = String::from("https://amax-emu.com/api");
                 let user_pfp_url = format!("{url_base}/players/pfp/name/{pretty_name}");
 
