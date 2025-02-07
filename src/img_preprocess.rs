@@ -1,8 +1,6 @@
 use anyhow::anyhow;
 use anyhow::Result;
 use image::{imageops::FilterType::Lanczos3, ImageOutputFormat};
-use log::error;
-use rand::Rng;
 use std::io::Cursor;
 use std::io::Read;
 
@@ -10,12 +8,12 @@ pub fn get_image_from_url(url: String) -> Result<Vec<u8>> {
     let resp = match ureq::get(&url).call() {
         Ok(resp) => resp,
         Err(e) => {
-            error!("Failed to make HTTP request: {e}");
+            log::error!("Failed to make HTTP request: {e}");
 
             let resp = match ureq::get("https://cs.amax-emu.com/amax_logo.png").call() {
                 Ok(resp) => resp,
                 Err(e) => {
-                    error!("Failed to make HTTP request: {e}");
+                    log::error!("Failed to make HTTP request: {e}");
                     return Err(anyhow!("Failed to make HTTP request"));
                 }
             };
@@ -30,9 +28,9 @@ pub fn get_image_from_url(url: String) -> Result<Vec<u8>> {
     {
         Some(content_size) => content_size,
         None => {
-            error!("Response from the server is missing Content-Lenght header.");
+            log::error!("Response from the server is missing Content-Length header.");
             return Err(anyhow!(
-                "Response from the server is missing Content-Lenght header."
+                "Response from the server is missing Content-Length header."
             ));
         }
     };
@@ -47,7 +45,7 @@ pub fn get_image_from_url(url: String) -> Result<Vec<u8>> {
     let mut img = match image::load_from_memory(&bytes) {
         Ok(img) => img,
         Err(e) => {
-            error!("Failed to parse downloaded image: {e}");
+            log::error!("Failed to parse downloaded image: {e}");
             return Err(anyhow!("Failed to parse downloaded image"));
         }
     };

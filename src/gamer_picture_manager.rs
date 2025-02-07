@@ -1,8 +1,6 @@
 use crate::img_preprocess::get_image_from_url;
 use anyhow::anyhow;
 use anyhow::Result;
-use log::debug;
-use log::warn;
 
 use fxhash::FxHashMap;
 use log::{error, info};
@@ -14,16 +12,12 @@ use widestring::WideCString;
 use windows::Win32::Graphics::Direct3D9::IDirect3DTexture9;
 extern crate fxhash;
 
+/// Due to how memory in Blur works there are some static locations in memory, that contain pointers to some structures.
+/// This one points to GAMER_PICTURE_MANAGER, which is great.
 pub static GAMER_PICTURE_MANAGER: i32 = 0x011a89c8;
-/*
-Due to how memory in Blur works there are some static locations in memory, that contain pointers to some structures.
-This one points to GAMER_PICTURE_MANAGER, which is great.
-*/
 
+/// This one points to your friend list.
 pub static _FRIEND_LIST: i32 = 0x011C7040;
-/*
-This one points to your friend list.
-*/
 
 //static URL_BASE: String = String::from("https://amax-emu.com/api");
 
@@ -43,6 +37,7 @@ struct GamerPictureManager {
 
 #[derive(Debug)]
 #[repr(C)]
+#[allow(non_camel_case_types)]
 struct C_GamerPicture {
     //total size on pc: 80
     unk_ptr0: u32, //0x4C 0xA8, 0xEA, 0x00,
@@ -83,23 +78,22 @@ struct MpUiLobbyData {
 }
 
 static_detour! {
-  static GetPrimaryProfilePictureHook: unsafe extern "system" fn() -> bool;
+    static GetPrimaryProfilePictureHook: unsafe extern "system" fn() -> bool;
 }
 
 static_detour! {
     static GamePictureManager_CreateHook: unsafe extern "system" fn(i32,i32,*const [u8;32],bool) -> bool;
 }
 
-//00b86d20
 static_detour! {
     static GamePictureManager_RequestRemotePicture: unsafe extern "system" fn(i32) -> bool;
 }
 
 //0079da10
 static_detour! {
+    /// little pesky function messing up things
     static GamePictureManager_WipeRemotePictures: unsafe extern "fastcall" fn(*mut GamerPictureManager);
 }
-//little pesky function messing up things
 
 pub unsafe fn create_get_primary_profile_picture_hook() {
     let address = 0x00d5e170;
@@ -111,63 +105,13 @@ pub unsafe fn create_get_primary_profile_picture_hook() {
         .unwrap();
 }
 
-pub unsafe fn create_gamer_picture_manager_hook() {
-    let address = 0x0079dc50; //gamerpicmanager_create
-    let target = mem::transmute(address);
-    GamePictureManager_CreateHook
-        .initialize(target, manager_create)
-        .unwrap()
-        .enable()
-        .unwrap();
-}
-
-pub unsafe fn create_request_remote_picture_game_hook() {
-    let address = 0x00b86d20;
-    let target = mem::transmute(address);
-    GetPrimaryProfilePictureHook
-        .initialize(target, primary_picture_load)
-        .unwrap()
-        .enable()
-        .unwrap();
-}
-
-pub unsafe fn create_wipe_remote_pictures_hook() {
-    let address = 0x0079da10;
-    let target = mem::transmute(address);
-    GamePictureManager_WipeRemotePictures
-        .initialize(target, wipe_remote_pictures)
-        .unwrap()
-        .enable()
-        .unwrap();
-}
-
-fn request_remote_picture(unk1: i32) -> bool {
-    info!("unk1: {unk1}");
-    return true;
-}
-
-fn wipe_remote_pictures(gpm: *mut GamerPictureManager) {
-    info!("Not wiping pictures!");
-    return;
-}
-
-fn manager_create(
-    max_local: i32,
-    max_remote: i32,
-    default_texture: *const [u8; 32],
-    small: bool,
-) -> bool {
-    debug!("max_local: {max_local}, max_remote:{max_remote},default_texture: {default_texture:?},small;:{small} ");
-    return true;
-}
-
 unsafe fn get_gamer_picture_manager() -> GamerPictureManager {
     let local_start = GAMER_PICTURE_MANAGER;
-    debug!("Addr of start: {:?}", local_start);
+    log::debug!("Addr of start: {:?}", local_start);
 
     let ptr = local_start as *const i32;
     let ptr = *ptr as *mut GamerPictureManager;
-    debug!("Addr of GamerPictureManager ptr: {:p}", &ptr);
+    log::debug!("Addr of GamerPictureManager ptr: {:p}", &ptr);
     //todo: there could be cases were GPM wouldn't be initiated.
     let gpm = *ptr;
 
@@ -185,14 +129,14 @@ fn primary_picture_load() -> bool {
         let gamer_picture_manager = get_gamer_picture_manager();
 
         for picture in *gamer_picture_manager.local_pictures_ptr {
-            debug!(
+            log::debug!(
                 "Addr of picture: {:p} Data: {:?}",
                 ptr::addr_of!(picture),
                 picture
             );
 
             let name = pretty_name(&(*picture).gamer_pic_name);
-            debug!("Processing {}", &name);
+            log::debug!("Processing {}", &name);
 
             //TODO: map gamerpics to (fx)hashmap to speedup?
             if name == "GAMERPIC_0" {
@@ -239,7 +183,7 @@ fn primary_picture_load() -> bool {
                     64,
                 );
 
-                debug!("Result: {:?}", result);
+                log::debug!("Result: {:?}", result);
 
                 if result.is_err() {
                     panic!();
@@ -299,7 +243,7 @@ fn get_primary_profile_pic(username: &str) -> Result<Vec<u8>> {
 
     match get_pfp_via_http_for_username(username) {
         Ok(img_data) => {
-            std::fs::write(local_pfp_path, &img_data);
+            std::fs::write(local_pfp_path, &img_data).unwrap();
             return Ok(img_data);
         }
         Err(e) => {
@@ -340,7 +284,7 @@ pub unsafe fn remote_pfp_updater() {
         let ptr = start as *const i32;
 
         if *ptr == 0 {
-            warn!("mp_ui_lobby_data pointer is empty! Sleeping");
+            log::warn!("mp_ui_lobby_data pointer is empty! Sleeping");
             thread::sleep(Duration::from_secs(1));
             continue;
         }
@@ -349,7 +293,7 @@ pub unsafe fn remote_pfp_updater() {
         let mp_ui_lobby_data = &*mp_ui_lobby_data_ptr;
 
         if mp_ui_lobby_data.total_players < 2 {
-            debug!(
+            log::debug!(
                 "We're alone in the lobby ({}), skipping... ({:?})",
                 mp_ui_lobby_data.total_players,
                 ptr::addr_of!(mp_ui_lobby_data.total_players)
@@ -358,30 +302,30 @@ pub unsafe fn remote_pfp_updater() {
             continue;
         }
 
-        debug!(
+        log::debug!(
             "We're not alone! Doing magic. {}. {:?}",
             mp_ui_lobby_data.total_players,
             ptr::addr_of!(mp_ui_lobby_data.total_players)
         );
 
         let gamer_picture_manager = get_gamer_picture_manager();
-        debug!("Got gamer_picture_manager");
+        log::debug!("Got gamer_picture_manager");
         let remote_pictures = *gamer_picture_manager.remote_pictures_ptr;
-        debug!("Got Remote pictures");
+        log::debug!("Got Remote pictures");
         let ui_players = mp_ui_lobby_data.net_players.read();
-        debug!("Got network players");
+        log::debug!("Got network players");
 
         for player_lobby_num in 0..(mp_ui_lobby_data.total_players - 1) {
             let player = ui_players[player_lobby_num as usize];
             let pretty_name = WideCString::from_vec_truncate(player.username_in_utf_16)
                 .to_string()
                 .unwrap();
-            debug!("Pretty name: {pretty_name}");
+            log::debug!("Pretty name: {pretty_name}");
 
             let picture = remote_pictures[player_lobby_num as usize];
 
             if (*picture).user_dw_id == player.user_dw_id {
-                debug!("PFP for this user ({}) is already set", pretty_name);
+                log::debug!("PFP for this user ({}) is already set", pretty_name);
                 if (*picture).free == false {
                     //failsafe
                     (*picture).ref1 = player.mp_lobby_ref_id as u16;
@@ -441,11 +385,11 @@ pub unsafe fn remote_pfp_updater() {
 
 pub unsafe fn trigger_lobby_update() -> Result<(), ()> {
     //the final piece of the puzzle
-    debug!("Triggering lobby update");
+    log::debug!("Triggering lobby update");
     let start = crate::EXE_BASE_ADDR + 0x00E42FF8;
 
     let ptr = start as *const i32;
-    debug!("Addr of ptr1: {:p},value: 0x0{:X}", ptr, *ptr);
+    log::debug!("Addr of ptr1: {:p},value: 0x0{:X}", ptr, *ptr);
 
     if *ptr == 0 {
         return Err(());
