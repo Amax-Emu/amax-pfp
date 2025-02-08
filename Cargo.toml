@@ -15,12 +15,13 @@ simplelog = "0.12.1"
 
 windows = { version = "0.52.0", features = ["Win32_Graphics_Direct3D9", "Win32_Graphics_Gdi", "Win32_Graphics_Direct3D", "Win32_Foundation", "Foundation_Numerics", "Win32_System_SystemServices", "Win32_System_Memory", "Win32_System_LibraryLoader"] }
 log-panics = { version = "2.1.0", features = ["with-backtrace"] }
-#winapi = { version = "0.3", features = ["winuser","d3d9","d3d9types","d3dcommon","d3d9caps"] }
 
 ureq = "2.8.0"
 image = { version = "0.24.7", features = ["png","dds","bmp"] }
 known-folders = "1.0.1"
-anyhow = "1.0.75"
-widestring = "1.0.2"
+#widestring = "1.0.2"
 fxhash = "0.2.1"
 rand = "0.8.5"
+
+blur-plugins-core = { git = "https://github.com/tobii-dev/blur-plugins-core" }
+widestring = "1.1.0"

@@ -1,24 +1,34 @@
-use anyhow::anyhow;
-use anyhow::Result;
 use image::{imageops::FilterType::Lanczos3, ImageOutputFormat};
 use std::io::Cursor;
 use std::io::Read;
 
-pub fn get_image_from_url(url: String) -> Result<Vec<u8>> {
+#[derive(Debug)]
+#[allow(unused)]
+pub enum AmaxImgError {
+	HttpFailedRequest(String),
+	HttpBadResponse,
+	BadParsing { e: image::error::ImageError },
+}
+
+impl std::fmt::Display for AmaxImgError {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		write!(f, "({self:?})")
+	}
+}
+impl std::error::Error for AmaxImgError {}
+
+pub fn get_image_from_url(url: String) -> Result<Vec<u8>, AmaxImgError> {
 	let resp = match ureq::get(&url).call() {
 		Ok(resp) => resp,
 		Err(e) => {
 			log::error!("Failed to make HTTP request: {e}");
-
-			let resp = match ureq::get("https://cs.amax-emu.com/amax_logo.png").call() {
+			match ureq::get("https://cs.amax-emu.com/amax_logo.png").call() {
 				Ok(resp) => resp,
 				Err(e) => {
 					log::error!("Failed to make HTTP request: {e}");
-					return Err(anyhow!("Failed to make HTTP request"));
+					return Err(AmaxImgError::HttpFailedRequest(e.to_string()));
 				}
-			};
-
-			resp
+			}
 		}
 	};
 
@@ -29,9 +39,7 @@ pub fn get_image_from_url(url: String) -> Result<Vec<u8>> {
 		Some(content_size) => content_size,
 		None => {
 			log::error!("Response from the server is missing Content-Length header.");
-			return Err(anyhow!(
-				"Response from the server is missing Content-Length header."
-			));
+			return Err(AmaxImgError::HttpBadResponse);
 		}
 	};
 
@@ -46,7 +54,7 @@ pub fn get_image_from_url(url: String) -> Result<Vec<u8>> {
 		Ok(img) => img,
 		Err(e) => {
 			log::error!("Failed to parse downloaded image: {e}");
-			return Err(anyhow!("Failed to parse downloaded image"));
+			return Err(AmaxImgError::BadParsing { e });
 		}
 	};
 
@@ -63,5 +71,5 @@ pub fn get_image_from_url(url: String) -> Result<Vec<u8>> {
 	//img.save_with_format("./debug.bmp", ImageFormat::Bmp);
 	//std::fs::write("./debug2.bmp", &return_vec);
 
-	return Ok(return_vec);
+	Ok(return_vec)
 }
