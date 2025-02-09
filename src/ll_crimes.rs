@@ -4,7 +4,7 @@ use windows::Win32::Graphics::Direct3D9::IDirect3DTexture9;
 
 use crate::gamer_picture_manager::{
 	get_pfp_via_http_for_username, pretty_name, vv_trigger_lobby_update, C_GamerPicture,
-	GamerPictureManager, MpUiLobbyData, NetPlayer,
+	GamerPictureManager, NetPlayer,
 };
 
 fn get_crusty_img_data() -> Vec<u8> {
@@ -34,18 +34,7 @@ fn get_first_lobby_net_racer<'a>(ptr_base: *mut c_void) -> Option<&'a mut NetPla
 	}
 }
 
-fn get_mp_ui_lobby_data<'a>(ptr_base: *mut c_void) -> Option<&'a MpUiLobbyData> {
-	let p: *mut *mut MpUiLobbyData = ptr_base.wrapping_byte_offset(0x00DB4530) as _;
-	unsafe {
-		let p: *mut MpUiLobbyData = p.read();
-		if p.is_null() {
-			None
-		} else {
-			Some(&(*p))
-		}
-	}
-}
-
+#[allow(unused)]
 struct MyGamerData {
 	pub name: String,
 	pub img_data: Vec<u8>,
@@ -166,6 +155,15 @@ C_GamerPicture[{idx}] (
 		}
 		let mut racist_idx: usize = 0;
 		let mut lobby_needs_update: bool = false;
+		
+		for pic in pics {
+			let pic: &mut C_GamerPicture = unsafe { &mut *pic };
+			pic.ref1 = 0 as u16;
+			pic.user_dw_id = 0;
+			pic.active = false;
+			pic.free = true;
+		}
+
 		while let Some(p) = racist {
 			let name = p.get_username();
 			let dwid = p.get_dw_id();
