@@ -18,14 +18,17 @@ impl std::fmt::Display for AmaxImgError {
 impl std::error::Error for AmaxImgError {}
 
 pub fn get_image_from_url(url: String) -> Result<Vec<u8>, AmaxImgError> {
+	const URL_AMAX_LOGO: &str = "https://cs.amax-emu.com/amax_logo.png";
+	log::info!("Req: {url}");
 	let resp = match ureq::get(&url).call() {
 		Ok(resp) => resp,
 		Err(e) => {
-			log::error!("Failed to make HTTP request: {e}");
-			match ureq::get("https://cs.amax-emu.com/amax_logo.png").call() {
+			log::error!("Failed to HTTP request: {e}");
+			log::info!("Req fallback: {URL_AMAX_LOGO}");
+			match ureq::get(URL_AMAX_LOGO).call() {
 				Ok(resp) => resp,
 				Err(e) => {
-					log::error!("Failed to make HTTP request: {e}");
+					log::error!("Failed to HTTP request Fallback: {e}");
 					return Err(AmaxImgError::HttpFailedRequest(e.to_string()));
 				}
 			}

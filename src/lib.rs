@@ -1,5 +1,8 @@
 use blur_plugins_core::{BlurAPI, BlurPlugin};
-use simplelog::*;
+use log::LevelFilter;
+use simplelog::{
+	ColorChoice, CombinedLogger, ConfigBuilder, TermLogger, TerminalMode, WriteLogger,
+};
 use std::{ffi::c_void, sync::LazyLock};
 
 use windows::{core::PCSTR, Win32::System::LibraryLoader::GetModuleHandleA};
@@ -7,6 +10,7 @@ use windows::{core::PCSTR, Win32::System::LibraryLoader::GetModuleHandleA};
 mod d3d9_utils;
 mod gamer_picture_manager;
 mod img_preprocess;
+mod ll_crimes;
 
 fn init_logs() {
 	let cfg = ConfigBuilder::new()
@@ -20,11 +24,11 @@ fn init_logs() {
 	CombinedLogger::init(vec![
 		TermLogger::new(
 			LevelFilter::Trace,
-			cfg,
+			cfg.clone(),
 			TerminalMode::Mixed,
 			ColorChoice::Auto,
 		),
-		WriteLogger::new(LevelFilter::Trace, Config::default(), log_file),
+		WriteLogger::new(LevelFilter::Trace, cfg, log_file),
 	])
 	.unwrap();
 	log_panics::init();
@@ -45,13 +49,14 @@ impl CoolBlurPlugin {
 			gamer_picture_manager::create_get_primary_profile_picture_hook();
 
 			std::thread::spawn(move || {
-				gamer_picture_manager::remote_pfp_updater(pp as _);
+				ll_crimes::run(pp as _);
 			});
+
+			// std::thread::spawn(move || { gamer_picture_manager::remote_pfp_updater(pp as _); });
 		};
 
 		Self { api, ptr_base }
 	}
-
 
 	/// Just for util
 	pub fn get_exe_base_ptr() -> *mut c_void {
