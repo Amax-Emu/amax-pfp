@@ -26,7 +26,7 @@ type D3DXCreateTextureFromFileInMemoryEx = extern "stdcall" fn(
 	ColorKey: u32,
 	pSrcInfo: *mut c_void,
 	pPalette: *mut c_void,
-	ppTexture: *mut IDirect3DTexture9,
+	ppTexture: *mut *mut IDirect3DTexture9,
 ) -> HRESULT;
 
 unsafe fn get_d3d9_device(ptr_base: *mut c_void) -> *mut IDirect3DDevice9 {
@@ -41,11 +41,10 @@ unsafe fn get_d3d9_device(ptr_base: *mut c_void) -> *mut IDirect3DDevice9 {
 }
 
 pub fn d3d9_create_tex_from_mem_ex(
-	texture_ptr: *mut IDirect3DTexture9,
 	tex_buffer: &mut [u8],
 	width: u32,
 	height: u32,
-) -> Result<(), ()> {
+) -> *mut IDirect3DTexture9 {
 	let d3d9_func: D3DXCreateTextureFromFileInMemoryEx = {
 		let func_addr =
 			get_module_symbol_address("d3dx9_42.dll", "D3DXCreateTextureFromFileInMemoryEx")
@@ -57,6 +56,7 @@ pub fn d3d9_create_tex_from_mem_ex(
 			.as_ref()
 			.unwrap()
 	};
+	let mut bobby: *mut IDirect3DTexture9 = std::ptr::null_mut();
 	let result = d3d9_func(
 		device,
 		tex_buffer.as_mut_ptr(),
@@ -72,12 +72,11 @@ pub fn d3d9_create_tex_from_mem_ex(
 		0xFF000000,
 		ptr::null_mut(),
 		ptr::null_mut(),
-		texture_ptr,
+		&mut bobby,
 	);
 
 	log::debug!("Result of D3DXCreateTextureFromFileInMemoryEx: {result:?}");
-
-	result.ok().or(Err(()))
+	bobby
 }
 
 pub fn get_module_symbol_address(module: &str, symbol: &str) -> Option<usize> {

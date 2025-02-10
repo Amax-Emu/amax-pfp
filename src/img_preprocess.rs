@@ -1,5 +1,4 @@
 use image::{imageops::FilterType::Lanczos3, ImageOutputFormat};
-use std::io::Cursor;
 use std::io::Read;
 
 #[derive(Debug)]
@@ -7,6 +6,7 @@ use std::io::Read;
 pub enum AmaxImgError {
 	HttpFailedRequest(String),
 	HttpBadResponse,
+	HttpBadContentLength,
 	BadParsing { e: image::error::ImageError },
 }
 
@@ -17,25 +17,25 @@ impl std::fmt::Display for AmaxImgError {
 }
 impl std::error::Error for AmaxImgError {}
 
-pub fn get_image_from_url(url: String) -> Result<Vec<u8>, AmaxImgError> {
+pub fn get_default_amax_pfp_img_data() -> Result<Vec<u8>, AmaxImgError> {
+	//"https://cdn.discordapp.com/avatars/925665499692544040/483eb1b92db6a449a0e2bed9a8b48bb3.png"
 	const URL_AMAX_LOGO: &str = "https://cs.amax-emu.com/amax_logo.png";
-	log::info!("Req: {url}");
-	let resp = match ureq::get(&url).call() {
-		Ok(resp) => resp,
-		Err(e) => {
-			log::error!("Failed to HTTP request: {e}");
-			log::info!("Req fallback: {URL_AMAX_LOGO}");
-			match ureq::get(URL_AMAX_LOGO).call() {
-				Ok(resp) => resp,
-				Err(e) => {
-					log::error!("Failed to HTTP request Fallback: {e}");
-					return Err(AmaxImgError::HttpFailedRequest(e.to_string()));
-				}
-			}
-		}
-	};
+	get_image_from_url(URL_AMAX_LOGO)
+}
 
-	let len = match resp
+pub fn get_amax_user_pfp_img_data(username: &str) -> Result<Vec<u8>, AmaxImgError> {
+	get_image_from_url(&std::format!(
+		"https://amax-emu.com/api/players/pfp/name/{username}"
+	))
+}
+
+fn get_image_from_url(url: &str) -> Result<Vec<u8>, AmaxImgError> {
+	let response = ureq::get(url).call().map_err(|e| {
+		log::error!("Failed HTTP request: {e}");
+		AmaxImgError::HttpFailedRequest(e.to_string())
+	})?;
+
+	let len = match response
 		.header("Content-Length")
 		.and_then(|s| s.parse::<usize>().ok())
 	{
@@ -46,33 +46,37 @@ pub fn get_image_from_url(url: String) -> Result<Vec<u8>, AmaxImgError> {
 		}
 	};
 
+	/// WTF
+	//TODO: Is this the best way? Check ureq::response::Response
+	const MAX_READ_LIMIT: u64 = 8 * 1024 * 1024;
 	let mut bytes: Vec<u8> = Vec::with_capacity(len);
-
-	resp.into_reader()
-		.take(10_000_000)
+	let recv_read_len = response
+		.into_reader()
+		.take(MAX_READ_LIMIT)
 		.read_to_end(&mut bytes)
-		.unwrap();
+		.expect("recv too many bytes to read!"); // idk what this is
+	log::trace!("Got back {recv_read_len} bytes in ureq::response::Response");
 
-	let mut img = match image::load_from_memory(&bytes) {
-		Ok(img) => img,
-		Err(e) => {
-			log::error!("Failed to parse downloaded image: {e}");
-			return Err(AmaxImgError::BadParsing { e });
-		}
-	};
+	let mut img = image::load_from_memory(&bytes).map_err(|e| {
+		log::error!("Failed read img_data downloaded from [{url}]: {e}");
+		AmaxImgError::BadParsing { e }
+	})?;
 
 	img = img.resize(64, 64, Lanczos3);
 
-	//REMOVE IN RELEASE
-	//img = img.huerotate(rand::thread_rng().gen_range(0..360));
-	//REMOVE IN RELEASE
+	//img = img.huerotate(rand::thread_rng().gen_range(0..360)); // :>
 
 	let mut return_vec: Vec<u8> = vec![];
-	img.write_to(&mut Cursor::new(&mut return_vec), ImageOutputFormat::Bmp)
-		.unwrap();
+	img.write_to(
+		&mut std::io::Cursor::new(&mut return_vec),
+		ImageOutputFormat::Bmp,
+	)
+	.map_err(|e| {
+		log::error!(
+			"Failed transform img_data downloaded from [{url}] to ImageOutputFormat::Bmp: {e}"
+		);
+		AmaxImgError::BadParsing { e }
+	})?;
 
-	//img.save_with_format("./debug.bmp", ImageFormat::Bmp);
-	//std::fs::write("./debug2.bmp", &return_vec);
-
-	Ok(return_vec)
+	Ok(return_vec) // YAY!
 }

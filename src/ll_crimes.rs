@@ -2,11 +2,14 @@ use std::ffi::c_void;
 
 use windows::Win32::Graphics::Direct3D9::IDirect3DTexture9;
 
-use crate::gamer_picture_manager::{
-	get_pfp_via_http_for_username, pretty_name, vv_trigger_lobby_update, C_GamerPicture,
-	GamerPictureManager, NetPlayer,
+use crate::{
+	gamer_picture_manager::{
+		trigger_lobby_update_v2, C_GamerPicture, GamerPictureManager, NetPlayer,
+	},
+	img_preprocess::get_amax_user_pfp_img_data,
 };
 
+//FIXME: Remove this
 fn get_crusty_img_data() -> Vec<u8> {
 	let dir = known_folders::get_known_folder_path(known_folders::KnownFolder::RoamingAppData)
 		.unwrap()
@@ -18,10 +21,15 @@ fn get_crusty_img_data() -> Vec<u8> {
 	std::fs::read(dir).unwrap()
 }
 
-fn get_crusty_d3d9_tex(p: *mut IDirect3DTexture9, crusty_img_data: &mut Vec<u8>) {
-	crate::d3d9_utils::d3d9_create_tex_from_mem_ex(p, crusty_img_data, 64, 64).unwrap();
+pub fn create_64x64_d3d9tex(img_data: &mut [u8]) -> *mut IDirect3DTexture9 {
+	crate::d3d9_utils::d3d9_create_tex_from_mem_ex(img_data, 64, 64)
 }
 
+// Gorgeous Precious Beautiful Majestic
+// (Okay maybe not Majestic)
+// There is a Linked List of NetRacers
+// This is how you can obtain the first NetPlayer in the list
+// NOTE: This might be the first time I find an actual Linked List that is somewhat useful in the wild!
 fn get_first_lobby_net_racer<'a>(ptr_base: *mut c_void) -> Option<&'a mut NetPlayer> {
 	let p: *mut *mut *mut NetPlayer = ptr_base.wrapping_byte_offset(0xDB4530) as _;
 	// * -> [[[Blur.exe + 0xDB4530] + 0x18] + 0]
@@ -42,16 +50,27 @@ struct MyGamerData {
 }
 
 impl MyGamerData {
-	pub fn new(username: &str, ptr: *mut IDirect3DTexture9) -> Self {
-		let mut user_img_data =
-			get_pfp_via_http_for_username(username).unwrap_or_else(|_| get_crusty_img_data());
-		//get_crusty_img_data();
-		log::info!("GET DATA [{username}]: {}", user_img_data.len());
-		get_crusty_d3d9_tex(ptr, &mut user_img_data);
+	pub fn new(username: &str) -> Self {
+		let mut user_img_data = get_amax_user_pfp_img_data(username)
+			.inspect(|http_img_data| {
+				log::info!(
+					"Got img_data ({} bytes) for \"{username}\" via HTTP.",
+					http_img_data.len()
+				)
+			})
+			.unwrap_or_else(|_| {
+				let crusty_img_data = get_crusty_img_data();
+				log::info!(
+					"Got img_data ({} bytes) for \"{username}\" via disk crusty.",
+					crusty_img_data.len()
+				);
+				crusty_img_data
+			});
+		let tex = create_64x64_d3d9tex(&mut user_img_data);
 		Self {
 			name: username.to_string(),
 			img_data: user_img_data,
-			tex_ptr: ptr,
+			tex_ptr: tex,
 		}
 	}
 }
@@ -65,22 +84,28 @@ impl MyCache {
 		Self { gamers: vec![] }
 	}
 
-	pub fn get(&mut self, username: &str, ptr: *mut IDirect3DTexture9) {
-		match self.gamers.iter_mut().find(|gamer| gamer.name == username) {
+	pub fn get(&mut self, username: &str) -> *mut IDirect3DTexture9 {
+		let gamer = match self.gamers.iter_mut().find(|gamer| gamer.name == username) {
 			Some(gamer) => {
 				log::info!("found \"{username}\" in pfp cache!");
-				unsafe { ptr.write(gamer.tex_ptr.read()) };
+				gamer
 			}
 			None => {
 				log::info!("adding \"{username}\" to pfp cache!");
-				self.gamers.push(MyGamerData::new(username, ptr));
+				self.gamers.push(MyGamerData::new(username));
+				self.gamers.last_mut().unwrap()
 			}
 		};
+		gamer.tex_ptr
 	}
 }
 
-fn get_gamer_picture_manager<'a>(ptr_base: *mut c_void) -> Option<&'a GamerPictureManager> {
-	// const GAMER_PICTURE_MANAGER_1: isize = 0x011a89c8;
+pub fn get_gamer_picture_manager_v2<'a>(
+	ptr_base: *mut c_void,
+) -> Option<&'a mut GamerPictureManager> {
+	/// Due to how memory in Blur works there are some static locations in memory, that contain pointers to some structures.
+	/// This one points to GAMER_PICTURE_MANAGER, which is great.
+	// const GAMER_PICTURE_MANAGER_1: isize = 0x011a89c8; // 0x11a89c8 is without ptr_base offset
 	const ADDR_GPM: isize = 0xDA89C8;
 	let p: *mut *mut GamerPictureManager = ptr_base.wrapping_byte_offset(ADDR_GPM) as _;
 	unsafe {
@@ -88,7 +113,7 @@ fn get_gamer_picture_manager<'a>(ptr_base: *mut c_void) -> Option<&'a GamerPictu
 		if p.is_null() {
 			None
 		} else {
-			Some(&(*p))
+			Some(&mut (*p))
 		}
 	}
 }
@@ -112,7 +137,7 @@ pub fn run(ptr_base: *mut c_void) {
 			continue;
 		};
 
-		let Some(gpm) = get_gamer_picture_manager(ptr_base) else {
+		let Some(gpm) = get_gamer_picture_manager_v2(ptr_base) else {
 			log::warn!("No get_gamer_picture_manager()...");
 			continue;
 		};
@@ -126,43 +151,12 @@ pub fn run(ptr_base: *mut c_void) {
 		}
 
 		let pics = unsafe { *(gpm.remote_pictures_ptr) };
-		{
-			for (idx, pic) in pics.into_iter().map(|p| (unsafe { &*p })).enumerate() {
-				if true {
-					continue;
-				}
-				log::info!(
-					"
-C_GamerPicture[{idx}] (
-	ref1: u16 = {},
-	user_dw_id: u64 = {},
-	active: bool = {},
-	free: bool = {},
-	gamer_pic_name: [u8; 30] = {},
-	texture_ptr: IDirect3DTexture9 = {:?},
-	default_texture_ptr: u32 = {}
-)
-",
-					pic.ref1,
-					pic.user_dw_id,
-					pic.active,
-					pic.free,
-					pretty_name(&pic.gamer_pic_name),
-					pic.texture_ptr,
-					pic.default_texture_ptr,
-				);
-			}
-		}
+
+		// The index in the linked list
+		// The local player is always at 0
 		let mut racist_idx: usize = 0;
+		let mut pics_idx: usize = racist_idx;
 		let mut lobby_needs_update: bool = false;
-		
-		for pic in pics {
-			let pic: &mut C_GamerPicture = unsafe { &mut *pic };
-			pic.ref1 = 0 as u16;
-			pic.user_dw_id = 0;
-			pic.active = false;
-			pic.free = true;
-		}
 
 		while let Some(p) = racist {
 			let name = p.get_username();
@@ -172,34 +166,39 @@ C_GamerPicture[{idx}] (
 				"Got player #{racist_idx} in lobby: \"{name}\" [{dwid}]. Their ref is: {refid}"
 			);
 			//NOTE: How should the game handle refid reaching 255?
+			// refid = 0 usually means that game is still loading lobby data
+			// racist_idx = 0 is for local player
 			if (0 < refid) && (0 < racist_idx) {
-				let pic: &mut C_GamerPicture = unsafe { &mut *(*(pics.get(racist_idx).unwrap())) };
+				let pic: &mut C_GamerPicture = unsafe { &mut *(*(pics.get(pics_idx).unwrap())) };
 				pic.ref1 = refid as u16;
 				pic.user_dw_id = dwid;
 				pic.active = true;
 				pic.free = false;
+
 				log::info!("Setting crusty tex for #{racist_idx} \"{name}\" ref:{refid}");
-				{
-					let remote_gamerpic_d3d9tex_ptr = std::ptr::addr_of_mut!(pic.texture_ptr);
-					my_cache.get(&name, remote_gamerpic_d3d9tex_ptr);
-					/*
-					crate::d3d9_utils::d3d9_create_tex_from_mem_ex(
-						remote_gamerpic_d3d9tex_ptr,
-						&mut img_data,
-						64,
-						64,
-					)
-					.unwrap();
-					*/
-				}
-				//
+				pic.texture_ptr = my_cache.get(&name);
+				pics_idx += 1;
+
 				lobby_needs_update = true;
 			}
 			racist_idx += 1;
 			racist = p.get_next();
 		}
+		// Clear data for players that left the lobby
+		// They didn't show up the NetRacers linked list, so their data in Pics should be cleared
+		for remaining_idx in pics_idx..pics.len() {
+			let pic: &mut C_GamerPicture = unsafe { &mut *(*(pics.get(remaining_idx).unwrap())) };
+			if 0 < pic.ref1 {
+				log::trace!("Clearing C_GamerPicture data @ GamerPictureManager.remote_pictures[{remaining_idx}]");
+				lobby_needs_update = true;
+			}
+			pic.ref1 = 0u16; // :> still do it anyway! idk just in case...
+			pic.user_dw_id = 0u64;
+			pic.active = false;
+			pic.free = true;
+		}
 		if lobby_needs_update {
-			vv_trigger_lobby_update(ptr_base);
+			trigger_lobby_update_v2(ptr_base);
 		}
 	}
 }

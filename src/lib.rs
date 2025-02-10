@@ -35,7 +35,7 @@ fn init_logs() {
 }
 
 #[allow(dead_code)]
-struct CoolBlurPlugin {
+pub struct CoolBlurPlugin {
 	api: &'static mut dyn BlurAPI,
 	ptr_base: *mut c_void,
 }
@@ -46,7 +46,7 @@ impl CoolBlurPlugin {
 		unsafe {
 			let pp = ptr_base as usize; // very ugly
 			assert!(pp == 0x00400000);
-			gamer_picture_manager::create_get_primary_profile_picture_hook();
+			gamer_picture_manager::install_hook_get_primary_profile_picture_v2(ptr_base);
 
 			std::thread::spawn(move || {
 				ll_crimes::run(pp as _);
@@ -60,12 +60,15 @@ impl CoolBlurPlugin {
 
 	/// Just for util
 	pub fn get_exe_base_ptr() -> *mut c_void {
+		//NOTE:
+		//Locking this is insane
+		//But I think it is funny to avoid calling GetModuleHandleA(..) because I have a weird personal vendetta against GetModuleHandleA(..)
 		static ONCE: LazyLock<usize> = LazyLock::new(|| {
 			let ptr_base: *mut c_void = unsafe { GetModuleHandleA(PCSTR::null()) }.unwrap().0 as _;
+			assert!(ptr_base as usize == 0x00400000);
 			ptr_base as usize
 		});
 		let p: usize = *ONCE;
-		assert!(p == 0x00400000);
 		p as *mut c_void
 	}
 }

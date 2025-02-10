@@ -1,23 +1,13 @@
-use crate::img_preprocess::{get_image_from_url, AmaxImgError};
+use crate::img_preprocess::{get_amax_user_pfp_img_data, get_default_amax_pfp_img_data};
+use crate::ll_crimes::{self, get_gamer_picture_manager_v2};
+use crate::CoolBlurPlugin;
 
-use fxhash::FxHashMap;
 use retour::static_detour;
 use std::ffi::c_void;
-use std::time::Duration;
-use std::{io, mem, str::Utf8Error};
+use std::path::PathBuf;
+use std::{io, str::Utf8Error};
 use widestring::WideCString;
 use windows::Win32::Graphics::Direct3D9::IDirect3DTexture9;
-
-/// Due to how memory in Blur works there are some static locations in memory, that contain pointers to some structures.
-/// This one points to GAMER_PICTURE_MANAGER, which is great.
-pub static GAMER_PICTURE_MANAGER: i32 = 0x011a89c8;
-
-/// This one points to your friend list.
-pub static _FRIEND_LIST: i32 = 0x011C7040;
-
-//static URL_BASE: String = String::from("https://amax-emu.com/api");
-
-//static PFP_CACHE: HashMap<String, Vec<u8>> = Lazy::new(||HashMap::new());
 
 #[derive(Debug, Clone, Copy)]
 #[repr(C)]
@@ -46,7 +36,7 @@ pub struct C_GamerPicture {
 	size_as_big_end_temp: u32, // 0x00, 0x00, 0x00, 0x00
 	unk_zeroes: u32,           // 0x00, 0x40 0x00, 0x00,
 	unk_4_as_u16: u16,         //0x04, 0x00,
-	pub texture_ptr: IDirect3DTexture9, //0xE0, 0x71 0x90, 0x14
+	pub texture_ptr: *mut IDirect3DTexture9, //0xE0, 0x71 0x90, 0x14
 	pub default_texture_ptr: u32, //   0xB0, 0xCB 0x40, 0x0F
 	unk4: u32,                 // 0x00, 0x00
 }
@@ -70,15 +60,16 @@ pub struct NetPlayer {
 impl NetPlayer {
 	pub fn get_next(&self) -> Option<&mut NetPlayer> {
 		if self.ptr_to_next.is_null() {
-			return None;
+			None
+		} else {
+			Some(unsafe { &mut *self.ptr_to_next })
 		}
-		return Some(unsafe { &mut *self.ptr_to_next });
 	}
 	pub fn get_dw_id(&self) -> u64 {
 		self.user_dw_id
 	}
 	pub fn get_username(&self) -> String {
-		WideCString::from_vec_truncate(&self.username_in_utf_16)
+		WideCString::from_vec_truncate(self.username_in_utf_16)
 			.to_string()
 			.unwrap()
 	}
@@ -92,54 +83,28 @@ impl NetPlayer {
 	}
 }
 
-#[derive(Debug)]
-#[repr(C)]
-#[allow(unused)]
-pub struct MpUiLobbyData {
-	// A rather short, but very usefull struct.
-	unk0: [u8; 28],
-	net_players: *mut [NetPlayer; 19],
-	total_players: u32, //client itself also counts, so to get number of connected remote users substract 1
-}
-
 static_detour! {
 	static GetPrimaryProfilePictureHook: unsafe extern "system" fn() -> bool;
 }
 
-static_detour! {
-	static GamePictureManager_CreateHook: unsafe extern "system" fn(i32,i32,*const [u8;32],bool) -> bool;
-}
+// static_detour! { static GamePictureManager_CreateHook: unsafe extern "system" fn(i32,i32,*const [u8;32],bool) -> bool; }
 
-static_detour! {
-	static GamePictureManager_RequestRemotePicture: unsafe extern "system" fn(i32) -> bool;
-}
+// static_detour! { static GamePictureManager_RequestRemotePicture: unsafe extern "system" fn(i32) -> bool; }
 
 //0079da10
-static_detour! {
-	/// little pesky function messing up things
-	static GamePictureManager_WipeRemotePictures: unsafe extern "fastcall" fn(*mut GamerPictureManager);
-}
+// little pesky function messing up things
+// static_detour! { static GamePictureManager_WipeRemotePictures: unsafe extern "fastcall" fn(*mut GamerPictureManager); }
 
-pub unsafe fn create_get_primary_profile_picture_hook() {
-	const ORG_FN_ADDRESS: isize = 0x00d5e170;
+pub unsafe fn install_hook_get_primary_profile_picture_v2(ptr_base: *mut c_void) {
 	type FnCreatePrimaryProfilePicture = unsafe extern "system" fn() -> bool;
-	let target = mem::transmute::<isize, FnCreatePrimaryProfilePicture>(ORG_FN_ADDRESS);
+	const ORG_FN_ADDRESS_OFFSET: isize = 0x0095E170;
+	let ptr = ptr_base.wrapping_byte_offset(ORG_FN_ADDRESS_OFFSET);
+	let ptr = std::mem::transmute::<*mut c_void, FnCreatePrimaryProfilePicture>(ptr);
 	GetPrimaryProfilePictureHook
-		.initialize(target, primary_picture_load)
+		.initialize(ptr, get_primary_profile_picture_hook)
 		.unwrap()
 		.enable()
 		.unwrap();
-}
-
-unsafe fn get_gamer_picture_manager() -> GamerPictureManager {
-	let local_start = GAMER_PICTURE_MANAGER;
-	log::debug!("Addr of start: {:?}", local_start);
-
-	let ptr = local_start as *const i32;
-	let ptr = *ptr as *mut GamerPictureManager;
-	log::debug!("Addr of GamerPictureManager ptr: {:p}", &ptr);
-	//todo: there could be cases were GPM wouldn't be initiated.
-	*ptr
 }
 
 pub fn pretty_name(name_buf: &[u8]) -> String {
@@ -147,43 +112,46 @@ pub fn pretty_name(name_buf: &[u8]) -> String {
 	name.trim_matches(char::from(0)).to_string()
 }
 
-fn primary_picture_load() -> bool {
-	log::info!("GetPrimaryProfilePicture hook");
+fn get_primary_profile_picture_hook() -> bool {
+	log::trace!("GetPrimaryProfilePictureHook!");
+	let ptr_base = CoolBlurPlugin::get_exe_base_ptr();
 	unsafe {
-		let gamer_picture_manager = get_gamer_picture_manager();
+		let gamer_picture_manager = get_gamer_picture_manager_v2(ptr_base).unwrap();
 		let local_picures = gamer_picture_manager.local_pictures_ptr.read();
 
 		for picture_ptr in local_picures {
-			let name = pretty_name(&(*picture_ptr).gamer_pic_name);
+			let pp = picture_ptr as usize;
+			let picture_ptr = &mut *picture_ptr;
+			let name = pretty_name(&picture_ptr.gamer_pic_name);
 
 			if name == "GAMERPIC_0" {
-				let username = match get_saved_profile_username() {
+				let username = match get_saved_profile_username_v2(ptr_base) {
 					Ok(username) => username.to_string(),
 					Err(e) => {
 						log::error!(
-							"Failed to get_saved_profile_username: {e}. Skipping pfp setup."
+							"Skipping primary profile picture setup because get_saved_profile_username() failed: {e}. "
 						);
 						continue;
 					}
 				};
-				log::info!("Loading primary picture for \"{username}\"");
 
 				//let img_data = get_image_from_url("https://cdn.discordapp.com/avatars/925665499692544040/483eb1b92db6a449a0e2bed9a8b48bb3.png");
-				let mut img_data = match get_primary_profile_pic(&username) {
-					Ok(img_data) => img_data,
-					Err(e) => {
-						log::error!("Failed to get local image {e}");
-						continue;
-					}
-				};
 
-				let d3d9_monke: *mut IDirect3DTexture9 =
-					std::ptr::addr_of_mut!((*picture_ptr).texture_ptr);
-				crate::d3d9_utils::d3d9_create_tex_from_mem_ex(d3d9_monke, &mut img_data, 64, 64)
-					.unwrap();
-				(*picture_ptr).active = true;
-				(*picture_ptr).free = false;
-				log::info!("We did the d3d9_monke: {d3d9_monke:?}");
+				// NOTE: Getting the img_data in the main thread will freeze game until response or timeout.
+				// So I will use using a thread!
+				// This is not sound but I wanna try it
+				std::thread::spawn(move || {
+					log::info!("Loading primary profile picture for \"{username}\"...");
+					let mut img_data = match get_primary_profile_img_data(&username) {
+						Ok(img_data) => img_data,
+						_ => return,
+					};
+					let picture_ptr = &mut *(pp as *mut C_GamerPicture);
+					picture_ptr.texture_ptr = ll_crimes::create_64x64_d3d9tex(&mut img_data); // YAY?
+					picture_ptr.active = true;
+					picture_ptr.free = false;
+					log::info!("We set the primary profile pic!!!! (?)");
+				});
 			}
 		}
 	}
@@ -191,215 +159,97 @@ fn primary_picture_load() -> bool {
 }
 
 //Yes, we gonna copy-paste same code for retreiving username from project to project, why are you asking?
-pub fn get_saved_profile_username() -> Result<String, Utf8Error> {
-	use std::ffi::{c_char, CStr};
-	use windows::{core::PCSTR, Win32::System::LibraryLoader::GetModuleHandleA};
-
-	let ptr_base: *mut std::ffi::c_void =
-		unsafe { GetModuleHandleA(PCSTR::null()) }.unwrap().0 as _;
-
+//TODO: (Consider) Getting profile username from BlurAPI instead
+pub fn get_saved_profile_username_v2(ptr_base: *mut c_void) -> Result<String, Utf8Error> {
 	// "Blur.exe"+0xE144E1
 	const OFFSET_PROFILE_USERNAME: isize = 0xE144E1;
 
-	let ptr = ptr_base.wrapping_offset(OFFSET_PROFILE_USERNAME) as *const c_char;
-	let s = unsafe { CStr::from_ptr(ptr) };
+	let ptr = ptr_base.wrapping_offset(OFFSET_PROFILE_USERNAME) as *const std::ffi::c_char;
+	let s = unsafe { std::ffi::CStr::from_ptr(ptr) };
 	match s.to_str() {
-		Ok(str) => Ok(str.to_string()),
+		Ok(s) => Ok(s.to_string()),
 		Err(e) => {
-			log::error!("Could not read username as UTF-8 str from profile.");
+			log::error!("Could not read profile username as UTF-8 &str.");
 			Err(e)
 		}
 	}
 }
 
-fn get_primary_profile_pic(username: &str) -> Result<Vec<u8>, std::io::Error> {
-	//first we try to get picture though HTTP
-
+fn get_local_default_pfp_filepath() -> Result<PathBuf, std::io::Error> {
 	let dir = known_folders::get_known_folder_path(known_folders::KnownFolder::RoamingAppData)
-		.ok_or_else(|| io::Error::other("Couldn't get FOLDERID_RoamingAppData (defautl: %USERPROFILE%\\AppData\\Roaming)] as a KnownFolder"))
-		.unwrap()
+		.ok_or_else(|| io::Error::other("Couldn't get FOLDERID_RoamingAppData (defaut: %USERPROFILE%\\AppData\\Roaming [%APPDATA%]) from system"))?
 		.join("bizarre creations")
 		.join("blur")
 		.join("amax");
-
 	if !&dir.is_dir() {
-		let dir_display = dir.display();
-		std::fs::create_dir_all(&dir)
-			.unwrap_or_else(|_| panic!("Failed to create amax folder in AppData: {dir_display}"));
+		std::fs::create_dir_all(&dir)?;
 	};
+	let local_pfp_path = dir.join("pfp.bmp");
+	Ok(local_pfp_path)
+}
 
-	let local_pfp_path = &dir.join("./pfp.bmp");
-	let local_pfp_path_display = local_pfp_path.display();
-
-	log::info!("Req: {username} -> {local_pfp_path_display}");
-	match get_pfp_via_http_for_username(username) {
+/// First try downloading pic from AMAX for that username
+/// If that fails, try a downloading a default one
+/// If downloading default also fails, try reading something from disk at default location
+/// If eighter was downloaded, store it on disk at default location
+/// NOTE: >Note for the people in the future:
+///   I propose removing all logic dealing with downloading defaults.
+///   Just simply always download instead.
+///   (Maybe, if downloading fails, use something from disk that the user put there manually. Maybe...!)
+fn get_primary_profile_img_data(username: &str) -> Result<Vec<u8>, std::io::Error> {
+	let pfp_path = &get_local_default_pfp_filepath()?;
+	let pfp_path_display = pfp_path.display();
+	match get_amax_user_pfp_img_data(username).or_else(|_| get_default_amax_pfp_img_data()) {
 		Ok(img_data) => {
-			std::fs::write(local_pfp_path, &img_data).unwrap();
-			log::info!("Saved to {local_pfp_path_display}");
+			// For now I think it is ok to just TRY to store it
+			// We can still continue if storage fails
+			match std::fs::write(pfp_path, &img_data) {
+				Ok(()) => {
+					log::trace!(
+						"Saved downloaded pfp data for \"{username}\" to disk [{pfp_path_display}]"
+					);
+				}
+				Err(e) => {
+					log::error!("Error saving downloaded pfp data for \"{username}\" to [{pfp_path_display}]: {e}");
+				}
+			};
 			return Ok(img_data); // YAY!
 		}
 		Err(e) => {
-			log::error!("Failed to get image via http: {e:#?}");
+			log::warn!("Failed to get pfp img_data via http for \"{username}\": {e}");
 		}
 	};
 
-	// attempt to fetch it from local cache, located in %APPDATA%
-	match std::fs::read(local_pfp_path) {
+	// try to read pfp from disk
+	match std::fs::read(pfp_path) {
 		Ok(img_data) => {
-			log::info!("Read from {local_pfp_path_display}");
+			log::trace!("Got primary profile picture from disk [{pfp_path_display}]");
 			Ok(img_data)
 		}
 		Err(e) => {
-			log::error!("Failed to read ima_data from {local_pfp_path_display}: {e}");
+			log::error!(
+				"Failed to read primary profile picture img_data from disk [{pfp_path_display}]: {e}"
+			);
 			Err(e)
 		}
 	}
 }
 
-pub fn get_pfp_via_http_for_username(username: &str) -> Result<Vec<u8>, AmaxImgError> {
-	//"https://cdn.discordapp.com/avatars/925665499692544040/483eb1b92db6a449a0e2bed9a8b48bb3.png"
-	//"https://cs.amax-emu.com/amax_logo.png"
-	get_image_from_url(std::format!(
-		"https://amax-emu.com/api/players/pfp/name/{username}"
-	))
-}
-
-pub unsafe fn remote_pfp_updater(ptr_base: *mut c_void) {
-	let mut pfp_cache: FxHashMap<u64, Vec<u8>> = FxHashMap::default();
-
-	loop {
-		std::thread::sleep(Duration::from_secs(1));
-
-		let ptr: *mut *mut MpUiLobbyData = ptr_base.wrapping_byte_offset(0x00DB4530) as _;
-		let ptr_ptr: *mut MpUiLobbyData = ptr.read();
-		if ptr_ptr.is_null() {
-			log::warn!("mp_ui_lobby_data pointer empty...");
-			continue;
-		}
-		let mp_ui_lobby_data: MpUiLobbyData = ptr_ptr.read();
-
-		let player_count = mp_ui_lobby_data.total_players;
-
-		if player_count < 2 {
-			log::debug!("We're alone in the lobby ({player_count})...");
-			continue;
-		}
-
-		log::debug!("We're not alone (MpUiLobbyData.total_players={player_count}).");
-
-		let gamer_picture_manager = get_gamer_picture_manager();
-		log::debug!("Got gamer_picture_manager");
-		let remote_pictures = (gamer_picture_manager.remote_pictures_ptr).read();
-		log::debug!("Got Remote pictures from gamer_picture_manager");
-
-		/* for (idx, remote_pic) in remote_pictures
-			.iter()
-			.enumerate()
-			.filter(|(_idx, pic)| !pic.is_null())
-			.map(|(idx, pic)| (idx, pic.read()))
-		{
-			// log::debug!("remote_pictures[{idx}]: {remote_pic:?}");
-		} */
-		let mp_ui_lobby_data_net_racers: [NetPlayer; 19] = (mp_ui_lobby_data.net_players).read();
-
-		/* for player in mp_ui_lobby_data_net_racers {
-			// dbg!(player);
-		} */
-		log::debug!("Got network players from MpUiLobbyData.net_players");
-
-		for player_idx in 0..(mp_ui_lobby_data.total_players as usize - 1) {
-			let net_player: NetPlayer = mp_ui_lobby_data_net_racers[player_idx];
-			let net_player_name = WideCString::from_vec_truncate(net_player.username_in_utf_16)
-				.to_string()
-				.unwrap();
-			log::debug!(
-				"mp_ui_lobby_data_net_racers[{player_idx}].username_in_utf_16={net_player_name}"
-			);
-
-			let remote_gamerpic_data_ptr: *mut C_GamerPicture = remote_pictures[player_idx];
-
-			let net_player_dw_id = net_player.user_dw_id;
-			if (*remote_gamerpic_data_ptr).user_dw_id == net_player_dw_id {
-				log::debug!("PFP for \"{net_player_name}\" [dw:{net_player_dw_id}] MpUiLobbyData[{player_idx}] is already set.");
-				if !(*remote_gamerpic_data_ptr).free {
-					//failsafe
-					(*remote_gamerpic_data_ptr).ref1 = net_player.mp_lobby_ref_id as u16;
-				}
-				continue;
-			}
-
-			let mut img_data = match pfp_cache.get(&net_player_dw_id) {
-				Some(data) => {
-					log::info!("Got pfp img_data for {net_player_name} via pfp_cache");
-					data.clone()
-				}
-				None => match get_pfp_via_http_for_username(&net_player_name) {
-					Ok(data) => {
-						log::info!("Got pfp img_data for {net_player_name} via http");
-						pfp_cache.insert(net_player_dw_id, data.clone());
-						data
-					}
-					Err(e) => {
-						log::error!("Failed to retrive image for {net_player_name}: {e}");
-						continue;
-					}
-				},
-			};
-
-			let remote_gamerpic_d3d9tex_ptr: *mut IDirect3DTexture9 =
-				std::ptr::addr_of_mut!((*remote_gamerpic_data_ptr).texture_ptr);
-			crate::d3d9_utils::d3d9_create_tex_from_mem_ex(
-				remote_gamerpic_d3d9tex_ptr,
-				&mut img_data,
-				64,
-				64,
-			)
-			.unwrap();
-
-			log::info!("set remote_gamerpic_data monke stuff: {remote_gamerpic_d3d9tex_ptr:?}");
-			(*remote_gamerpic_data_ptr).user_dw_id = net_player.user_dw_id;
-			(*remote_gamerpic_data_ptr).ref1 = net_player.mp_lobby_ref_id as u16;
-			(*remote_gamerpic_data_ptr).active = true;
-			(*remote_gamerpic_data_ptr).free = false;
-			let _ = trigger_lobby_update(ptr_base);
-			log::info!("DONE for {net_player_name}");
-		}
-	}
-}
-
 #[allow(unused)]
-pub unsafe fn trigger_lobby_update(ptr_base: *mut c_void) -> Result<(), ()> {
-	//the final piece of the puzzle
-	log::debug!("Triggering lobby update");
-	let start = ptr_base.wrapping_offset(0x00E42FF8);
-
-	let ptr = start as *const i32;
-	log::debug!("Addr of ptr1: {:p},value: 0x0{:X}", ptr, *ptr);
-
-	if *ptr == 0 {
-		return Err(());
-	};
-
-	let step2 = *ptr;
-
-	let step3 = step2 + 0x181;
-
-	let lobby_need_update = step3 as *mut bool;
-	*lobby_need_update = true;
-	Ok(())
-}
-
-#[allow(unused)]
-pub fn vv_trigger_lobby_update(ptr_base: *mut c_void) {
-	let p: *mut *mut bool = ptr_base.wrapping_offset(0x00E42FF8) as _;
+pub fn trigger_lobby_update_v2(ptr_base: *mut c_void) {
+	/// @Aibot: How did you find these?
+	const OFFSET_PTR_LOBBY_START: isize = 0x00E42FF8;
+	/// I want to document <what> they actually are, and give them better names
+	const OFFSET_TRIGGER_UPDATE_BOOL: isize = 0x181;
+	let p: *mut *mut bool = ptr_base.wrapping_byte_offset(OFFSET_PTR_LOBBY_START) as _;
 	unsafe {
 		let p: *mut bool = p.read();
 		if p.is_null() {
-			log::warn!("failed to vv_trigger_lobby_update()");
+			log::warn!("trigger_lobby_update_v2() failed: start pointer [{p:?}] is null.");
 			return;
-		} else {
-			log::trace!("w:vv_trigger_lobby_update()");
-			p.wrapping_byte_offset(0x181).write(true);
 		}
+		log::trace!("Triggering lobby update!");
+		p.wrapping_byte_offset(OFFSET_TRIGGER_UPDATE_BOOL)
+			.write(true);
 	}
 }
