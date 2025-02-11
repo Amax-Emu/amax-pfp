@@ -89,22 +89,40 @@ static_detour! {
 
 // static_detour! { static GamePictureManager_CreateHook: unsafe extern "system" fn(i32,i32,*const [u8;32],bool) -> bool; }
 
-// static_detour! { static GamePictureManager_RequestRemotePicture: unsafe extern "system" fn(i32) -> bool; }
+static_detour! {
+	static GamePictureManager_RequestRemotePicture: unsafe extern "system" fn(i32) -> bool;
+}
 
 //0079da10
 // little pesky function messing up things
 // static_detour! { static GamePictureManager_WipeRemotePictures: unsafe extern "fastcall" fn(*mut GamerPictureManager); }
 
-pub unsafe fn install_hook_get_primary_profile_picture_v2(ptr_base: *mut c_void) {
-	type FnCreatePrimaryProfilePicture = unsafe extern "system" fn() -> bool;
+pub fn install_hook_get_primary_profile_picture_v2(ptr_base: *mut c_void) {
+	type FnGetPrimaryProfilePicture = unsafe extern "system" fn() -> bool;
 	const ORG_FN_ADDRESS_OFFSET: isize = 0x0095E170;
 	let ptr = ptr_base.wrapping_byte_offset(ORG_FN_ADDRESS_OFFSET);
-	let ptr = std::mem::transmute::<*mut c_void, FnCreatePrimaryProfilePicture>(ptr);
-	GetPrimaryProfilePictureHook
-		.initialize(ptr, get_primary_profile_picture_hook)
-		.unwrap()
-		.enable()
-		.unwrap();
+	unsafe {
+		let ptr = std::mem::transmute::<*mut c_void, FnGetPrimaryProfilePicture>(ptr);
+		GetPrimaryProfilePictureHook
+			.initialize(ptr, get_primary_profile_picture_hook)
+			.unwrap()
+			.enable()
+			.unwrap();
+	}
+}
+
+pub fn install_hook_request_remote_picture(ptr_base: *mut c_void) {
+	type FnRequestRemotePicture = unsafe extern "system" fn(i32) -> bool;
+	const ORG_FN_ADDRESS_OFFSET_REQUEST_REMOTE_PICTURE: isize = 0x786D20;
+	let ptr = ptr_base.wrapping_byte_offset(ORG_FN_ADDRESS_OFFSET_REQUEST_REMOTE_PICTURE);
+	unsafe {
+		let ptr = std::mem::transmute::<*mut c_void, FnRequestRemotePicture>(ptr);
+		GamePictureManager_RequestRemotePicture
+			.initialize(ptr, request_remote_picture_hook)
+			.unwrap()
+			.enable()
+			.unwrap();
+	}
 }
 
 pub fn pretty_name(name_buf: &[u8]) -> String {
@@ -114,52 +132,61 @@ pub fn pretty_name(name_buf: &[u8]) -> String {
 
 fn get_primary_profile_picture_hook() -> bool {
 	log::trace!("GetPrimaryProfilePictureHook!");
-	let ptr_base = CoolBlurPlugin::get_exe_base_ptr();
-	unsafe {
-		let gamer_picture_manager = get_gamer_picture_manager_v2(ptr_base).unwrap();
-		let local_picures = gamer_picture_manager.local_pictures_ptr.read();
-
-		for picture_ptr in local_picures {
-			let pp = picture_ptr as usize;
-			let picture_ptr = &mut *picture_ptr;
-			let name = pretty_name(&picture_ptr.gamer_pic_name);
-
+	// NOTE: Getting the img_data in the main thread will freeze game until response or timeout.
+	// So let us spawn a thread to do all of this in the background
+	// This is not sound but I wanna try it
+	std::thread::spawn(move || {
+		let ptr_base = CoolBlurPlugin::get_exe_base_ptr();
+		let local_picures = unsafe {
+			*(get_gamer_picture_manager_v2(ptr_base)
+				.unwrap()
+				.local_pictures_ptr)
+		};
+		for local_gamer_pic in local_picures {
+			let local_gamer_pic = unsafe { &mut *local_gamer_pic };
+			let name = pretty_name(&local_gamer_pic.gamer_pic_name);
 			if name == "GAMERPIC_0" {
 				let username = match get_saved_profile_username_v2(ptr_base) {
 					Ok(username) => username.to_string(),
 					Err(e) => {
 						log::error!(
-							"Skipping primary profile picture setup because get_saved_profile_username() failed: {e}. "
-						);
+								"Skipping primary profile picture setup because get_saved_profile_username() failed: {e}. "
+							);
 						continue;
 					}
 				};
 
 				//let img_data = get_image_from_url("https://cdn.discordapp.com/avatars/925665499692544040/483eb1b92db6a449a0e2bed9a8b48bb3.png");
-
-				// NOTE: Getting the img_data in the main thread will freeze game until response or timeout.
-				// So I will use using a thread!
-				// This is not sound but I wanna try it
-				std::thread::spawn(move || {
-					log::info!("Loading primary profile picture for \"{username}\"...");
-					let mut img_data = match get_primary_profile_img_data(&username) {
-						Ok(img_data) => img_data,
-						_ => return,
-					};
-					let picture_ptr = &mut *(pp as *mut C_GamerPicture);
-					picture_ptr.texture_ptr = ll_crimes::create_64x64_d3d9tex(&mut img_data); // YAY?
-					picture_ptr.active = true;
-					picture_ptr.free = false;
-					log::info!("We set the primary profile pic!!!! (?)");
-				});
+				log::info!("Loading primary profile picture for \"{username}\"...");
+				let mut img_data = match get_primary_profile_img_data(&username) {
+					Ok(img_data) => img_data,
+					_ => return,
+				};
+				local_gamer_pic.texture_ptr = ll_crimes::create_64x64_d3d9tex(&mut img_data); // YAY?
+				local_gamer_pic.active = true;
+				local_gamer_pic.free = false;
+				log::info!("We set the primary profile pic!!!! (?)");
 			}
 		}
-	}
+	});
+
 	false
 }
 
-//Yes, we gonna copy-paste same code for retreiving username from project to project, why are you asking?
-//TODO: (Consider) Getting profile username from BlurAPI instead
+fn request_remote_picture_hook(arg: i32) -> bool {
+	type FnRequestRemotePicture = unsafe extern "system" fn(i32) -> bool;
+	const ORG_FN_ADDRESS_OFFSET_REQUEST_REMOTE_PICTURE: isize = 0x786D20;
+	let ptr_base = CoolBlurPlugin::get_exe_base_ptr();
+	let ptr = ptr_base.wrapping_byte_offset(ORG_FN_ADDRESS_OFFSET_REQUEST_REMOTE_PICTURE);
+	unsafe {
+		let fn_org = std::mem::transmute::<*mut c_void, FnRequestRemotePicture>(ptr);
+		let org_result = fn_org(arg);
+		log::trace!("GamePictureManager_RequestRemotePicture({arg}) -> {org_result}");
+		org_result
+	}
+}
+
+//TODO: (Consider) Getting profile username from BlurAPI instead?
 pub fn get_saved_profile_username_v2(ptr_base: *mut c_void) -> Result<String, Utf8Error> {
 	// "Blur.exe"+0xE144E1
 	const OFFSET_PROFILE_USERNAME: isize = 0xE144E1;
@@ -175,7 +202,7 @@ pub fn get_saved_profile_username_v2(ptr_base: *mut c_void) -> Result<String, Ut
 	}
 }
 
-fn get_local_default_pfp_filepath() -> Result<PathBuf, std::io::Error> {
+pub fn get_local_default_pfp_filepath() -> Result<PathBuf, std::io::Error> {
 	let dir = known_folders::get_known_folder_path(known_folders::KnownFolder::RoamingAppData)
 		.ok_or_else(|| io::Error::other("Couldn't get FOLDERID_RoamingAppData (defaut: %USERPROFILE%\\AppData\\Roaming [%APPDATA%]) from system"))?
 		.join("bizarre creations")
@@ -245,7 +272,7 @@ pub fn trigger_lobby_update_v2(ptr_base: *mut c_void) {
 	unsafe {
 		let p: *mut bool = p.read();
 		if p.is_null() {
-			log::warn!("trigger_lobby_update_v2() failed: start pointer [{p:?}] is null.");
+			log::trace!("trigger_lobby_update_v2() failed (start pointer is null).");
 			return;
 		}
 		log::trace!("Triggering lobby update!");

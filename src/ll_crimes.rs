@@ -7,6 +7,7 @@ use crate::{
 		trigger_lobby_update_v2, C_GamerPicture, GamerPictureManager, NetPlayer,
 	},
 	img_preprocess::get_amax_user_pfp_img_data,
+	CoolBlurPlugin,
 };
 
 //FIXME: Remove this
@@ -100,14 +101,18 @@ impl MyCache {
 	}
 }
 
+//FIXME: Rust aliasing rules make this kind of &mut T reference unsound (*SOMETIMES!*)
+// The compiler can assume that there is nothing else pointing to T, and do stuff we don't want.
+// I don't know how likely that is tho.
+// I think in most cases here we should be fine.
+// It would be better to just return the raw pointer  -> `Option<*mut GamerPictureManager>`
+// I hate working the *mut T though, all the unsafe and all the dereferencing with (*T) is annoying.
+// Also this whole DLL is unsafe and Blur is unsafe AND WHO IS EVEN GONNA READ THIS LALALAlalalal ITS MY PULL REQUEST I CAN DO WHAT I WANT
 pub fn get_gamer_picture_manager_v2<'a>(
 	ptr_base: *mut c_void,
 ) -> Option<&'a mut GamerPictureManager> {
-	/// Due to how memory in Blur works there are some static locations in memory, that contain pointers to some structures.
-	/// This one points to GAMER_PICTURE_MANAGER, which is great.
-	// const GAMER_PICTURE_MANAGER_1: isize = 0x011a89c8; // 0x11a89c8 is without ptr_base offset
-	const ADDR_GPM: isize = 0xDA89C8;
-	let p: *mut *mut GamerPictureManager = ptr_base.wrapping_byte_offset(ADDR_GPM) as _;
+	const ADDR_GPM_OFFSET: isize = 0xDA89C8;
+	let p: *mut *mut GamerPictureManager = ptr_base.wrapping_byte_offset(ADDR_GPM_OFFSET) as _;
 	unsafe {
 		let p: *mut GamerPictureManager = p.read();
 		if p.is_null() {
@@ -118,43 +123,33 @@ pub fn get_gamer_picture_manager_v2<'a>(
 	}
 }
 
-pub fn run(ptr_base: *mut c_void) {
-	log::info!("Hello from very annoying thread!");
+pub fn run() {
+	log::trace!("Hellooooo from the other sideeeeeeee (thread)");
 	let mut my_cache: MyCache = MyCache::new();
+	let ptr_base: *mut c_void = CoolBlurPlugin::get_exe_base_ptr();
 	loop {
 		std::thread::sleep(std::time::Duration::from_millis(1000));
 
-		/*
-		let Some(_ui_lobby) = get_mp_ui_lobby_data(ptr_base) else {
-			log::warn!("No get_mp_ui_lobby_data()...");
-			continue;
-		};
-		*/
-
 		let mut racist = get_first_lobby_net_racer(ptr_base);
 		if racist.is_none() {
-			log::trace!("No get_first_lobby_net_racer(). Fails to obtain first racist from LL.");
+			log::trace!(
+				"No get_first_lobby_net_racer() obtained from Linked List of NetRacists. We are probably not in a lobby."
+			);
 			continue;
 		};
 
 		let Some(gpm) = get_gamer_picture_manager_v2(ptr_base) else {
+			// I don't know where this should happen exactly
 			log::warn!("No get_gamer_picture_manager()...");
 			continue;
 		};
 
-		{
-			let l_len = gpm.local_pictures_len;
-			let l_size = gpm.local_pictures_size;
-			let r_len = gpm.remote_pictures_len;
-			let r_size = gpm.remote_pictures_size;
-			log::trace!("GPM: Local({l_len}/{l_size}) Remote({r_len}/{r_size})");
-		}
-
 		let pics = unsafe { *(gpm.remote_pictures_ptr) };
 
-		// The index in the linked list
-		// The local player is always at 0
+		// The index in the linked list of NetRacists
+		// The local player is always at the first position in the linked list
 		let mut racist_idx: usize = 0;
+		// The other 19 possible players will be second, third, fourth, ...
 		let mut pics_idx: usize = racist_idx;
 		let mut lobby_needs_update: bool = false;
 
@@ -163,19 +158,27 @@ pub fn run(ptr_base: *mut c_void) {
 			let dwid = p.get_dw_id();
 			let refid = p.get_lobby_ref();
 			log::info!(
-				"Got player #{racist_idx} in lobby: \"{name}\" [{dwid}]. Their ref is: {refid}"
+				"Got player NetRacist #{racist_idx} in lobby: \"{name}\" [{dwid}]. Their ref is: {refid}"
 			);
-			//NOTE: How should the game handle refid reaching 255?
-			// refid = 0 usually means that game is still loading lobby data
+			//NOTE: refid is u8 and handled by the game. I have no idea what happens when it reaches 255...
+			// a refid=0 usually means that game is still loading lobby data
 			// racist_idx = 0 is for local player
 			if (0 < refid) && (0 < racist_idx) {
 				let pic: &mut C_GamerPicture = unsafe { &mut *(*(pics.get(pics_idx).unwrap())) };
+				// TODO: This overwrites (and thus triggers lobby update) on every cycle
+				// It might be better to only overwrite when necessary: only when NetPlayer.dwid != pic.dwid
 				pic.ref1 = refid as u16;
 				pic.user_dw_id = dwid;
 				pic.active = true;
 				pic.free = false;
 
-				log::info!("Setting crusty tex for #{racist_idx} \"{name}\" ref:{refid}");
+				log::info!("Setting tex for NetRacist #{racist_idx} \"{name}\" ref:{refid} in remote_pictures[{pics_idx}]");
+				//NOTE: MyCache::get(..) could take a while.
+				// It is possible that the lobby info changes in the meantime (players joining and leaving, local disconnect)
+				// If it desyncs, I think that gets resolved in a few cycles
+				// Ideal would be to handle the downloading to cache in another thread
+				// Then here we only set texture IF it has already been obtained...
+				//TODO: thread for downloading
 				pic.texture_ptr = my_cache.get(&name);
 				pics_idx += 1;
 
@@ -186,13 +189,14 @@ pub fn run(ptr_base: *mut c_void) {
 		}
 		// Clear data for players that left the lobby
 		// They didn't show up the NetRacers linked list, so their data in Pics should be cleared
-		for remaining_idx in pics_idx..pics.len() {
-			let pic: &mut C_GamerPicture = unsafe { &mut *(*(pics.get(remaining_idx).unwrap())) };
+		for remaining_pic_idx in pics_idx..pics.len() {
+			let pic: &mut C_GamerPicture =
+				unsafe { &mut *(*(pics.get(remaining_pic_idx).unwrap())) };
 			if 0 < pic.ref1 {
-				log::trace!("Clearing C_GamerPicture data @ GamerPictureManager.remote_pictures[{remaining_idx}]");
+				log::trace!("Clearing C_GamerPicture data @ GamerPictureManager.remote_pictures[{remaining_pic_idx}]");
 				lobby_needs_update = true;
 			}
-			pic.ref1 = 0u16; // :> still do it anyway! idk just in case...
+			pic.ref1 = 0u16; // still do it anyway :D just in case...
 			pic.user_dw_id = 0u64;
 			pic.active = false;
 			pic.free = true;

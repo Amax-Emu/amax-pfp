@@ -1,9 +1,10 @@
 use std::{
 	ffi::{c_void, CString},
-	iter, ptr,
+	iter,
+	sync::LazyLock,
 };
 use windows::Win32::Graphics::Direct3D9::{
-	IDirect3DDevice9, IDirect3DTexture9, D3DFORMAT, D3DPOOL,
+	IDirect3DTexture9, D3DFMT_X8R8G8B8, D3DFORMAT, D3DPOOL, D3DPOOL_MANAGED,
 };
 
 use windows::{
@@ -12,7 +13,7 @@ use windows::{
 };
 
 type D3DXCreateTextureFromFileInMemoryEx = extern "stdcall" fn(
-	device: &IDirect3DDevice9,
+	device: *mut c_void,
 	pSrcData: *mut u8,
 	SrcDataSize: usize,
 	Width: u32,
@@ -29,57 +30,61 @@ type D3DXCreateTextureFromFileInMemoryEx = extern "stdcall" fn(
 	ppTexture: *mut *mut IDirect3DTexture9,
 ) -> HRESULT;
 
-unsafe fn get_d3d9_device(ptr_base: *mut c_void) -> *mut IDirect3DDevice9 {
-	const OFFSET_D3D9DEV_PTR_PATH_START: isize = 0x00D44EE4;
-	const OFFSET_D3D9DEV_PTR_PATH_L0: isize = 0x14;
-	let start: *mut *mut *mut IDirect3DDevice9 =
-		ptr_base.wrapping_offset(OFFSET_D3D9DEV_PTR_PATH_START) as _;
-	start
-		.read()
-		.wrapping_byte_offset(OFFSET_D3D9DEV_PTR_PATH_L0)
-		.read()
-}
-
 pub fn d3d9_create_tex_from_mem_ex(
 	tex_buffer: &mut [u8],
 	width: u32,
 	height: u32,
 ) -> *mut IDirect3DTexture9 {
-	let d3d9_func: D3DXCreateTextureFromFileInMemoryEx = {
+	static ONCE_FN_D3DX_CREATE_TEXTURE_FROM_FILE_IN_MEMORY_EX: LazyLock<
+		D3DXCreateTextureFromFileInMemoryEx,
+	> = LazyLock::new(|| {
 		let func_addr =
 			get_module_symbol_address("d3dx9_42.dll", "D3DXCreateTextureFromFileInMemoryEx")
-				.expect("could not find 'D3DXCreateTextureFromFileInMemoryEx' address");
-		unsafe { std::mem::transmute(func_addr) }
-	};
-	let device: &IDirect3DDevice9 = unsafe {
-		get_d3d9_device(crate::CoolBlurPlugin::get_exe_base_ptr())
-			.as_ref()
-			.unwrap()
-	};
-	let mut bobby: *mut IDirect3DTexture9 = std::ptr::null_mut();
-	let result = d3d9_func(
-		device,
-		tex_buffer.as_mut_ptr(),
-		tex_buffer.len(),
-		width,
-		height,
-		1,
-		0,
-		D3DFORMAT(20),
-		D3DPOOL(1),
-		1,
-		1,
-		0xFF000000,
-		ptr::null_mut(),
-		ptr::null_mut(),
-		&mut bobby,
-	);
+				.expect("could not get_module_symbol_address() for 'D3DXCreateTextureFromFileInMemoryEx(..)' function in 'd3dx9_42.dll'");
+		unsafe { std::mem::transmute::<usize, D3DXCreateTextureFromFileInMemoryEx>(func_addr) }
+	});
+	let d3d9_func = *ONCE_FN_D3DX_CREATE_TEXTURE_FROM_FILE_IN_MEMORY_EX;
 
-	log::debug!("Result of D3DXCreateTextureFromFileInMemoryEx: {result:?}");
-	bobby
+	let mut tex_ptr: *mut IDirect3DTexture9 = std::ptr::null_mut();
+
+	d3d9_func(
+		// ptr to IDirect3DDevice9
+		crate::CoolBlurPlugin::get_api().get_d3d9dev(),
+		// ptr to bytes img data
+		tex_buffer.as_mut_ptr(),
+		// size of file in mem
+		tex_buffer.len(),
+		// image width
+		width,
+		// image height
+		height,
+		// mipLevels
+		1,
+		// (default?) usage. idk what 0 means and I'm too scared to look it up
+		0,
+		// D3DFMT_R8G8B8 | https://learn.microsoft.com/en-us/windows/win32/direct3d9/d3dformat
+		D3DFMT_X8R8G8B8,
+		// D3DPOOL_MANAGED | https://learn.microsoft.com/en-us/windows/win32/direct3d9/d3dpool
+		D3DPOOL_MANAGED,
+		// .filter = D3DX_FILTER_NONE  | https://learn.microsoft.com/en-us/windows/win32/direct3d9/d3dx-filter
+		1,
+		// .MipFilter = D3DX_FILTER_NONE
+		1,
+		// .ColorKey = D3DCOLOR, 32bit ARGB, opaque black
+		0xFF000000,
+		// pSrcInfo D3DXIMAGE_INFO structure to be filled with a description of the data in the source image file, or NULL
+		std::ptr::null_mut(),
+		// pPalette Pointer to a PALETTEENTRY structure, representing a 256-color palette to fill in, or NULL
+		std::ptr::null_mut(),
+		// ppTexture | Address of a pointer to an IDirect3DTexture9 interface, representing the created texture object.
+		&mut tex_ptr,
+	)
+	.unwrap();
+
+	tex_ptr
 }
 
-pub fn get_module_symbol_address(module: &str, symbol: &str) -> Option<usize> {
+fn get_module_symbol_address(module: &str, symbol: &str) -> Option<usize> {
 	let module = module
 		.encode_utf16()
 		.chain(iter::once(0))
