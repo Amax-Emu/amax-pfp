@@ -1,5 +1,5 @@
 use crate::img_preprocess::{get_amax_user_pfp_img_data, get_default_amax_pfp_img_data};
-use crate::ll_crimes::{self, get_gamer_picture_manager_v2};
+use crate::ll_crimes::get_gamer_picture_manager_v2;
 use crate::CoolBlurPlugin;
 
 use retour::static_detour;
@@ -27,7 +27,7 @@ pub struct GamerPictureManager {
 pub struct C_GamerPicture {
 	//total size on pc: 80
 	unk_ptr0: u32, //0x4C 0xA8, 0xEA, 0x00,
-	pub ref1: u16,
+	pub ref1: u16, // when this matches a NetRacer.mp_lobby_ref_id, the good things happen
 	pub user_dw_id: u64,
 	user_information: [u8; 8], // 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x0C, 0x00, 0x00, 0x00
 	pub active: bool,          // 0x00
@@ -162,7 +162,8 @@ fn get_primary_profile_picture_hook() -> bool {
 					Ok(img_data) => img_data,
 					_ => return,
 				};
-				local_gamer_pic.texture_ptr = ll_crimes::create_64x64_d3d9tex(&mut img_data); // YAY?
+				local_gamer_pic.texture_ptr =
+					crate::d3d9_utils::create_64x64_d3d9tex(&mut img_data); // YAY?
 				local_gamer_pic.active = true;
 				local_gamer_pic.free = false;
 				log::info!("We set the primary profile pic!!!! (?)");
@@ -175,7 +176,7 @@ fn get_primary_profile_picture_hook() -> bool {
 
 fn request_remote_picture_hook(arg: i32) -> bool {
 	type FnRequestRemotePicture = unsafe extern "system" fn(i32) -> bool;
-	const ORG_FN_ADDRESS_OFFSET_REQUEST_REMOTE_PICTURE: isize = 0x786D20;
+	const ORG_FN_ADDRESS_OFFSET_REQUEST_REMOTE_PICTURE: isize = 0x786D20; // Yea Yea Yea we should save the original somewhere. Is this thing even called?
 	let ptr_base = CoolBlurPlugin::get_exe_base_ptr();
 	let ptr = ptr_base.wrapping_byte_offset(ORG_FN_ADDRESS_OFFSET_REQUEST_REMOTE_PICTURE);
 	unsafe {

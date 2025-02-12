@@ -3,28 +3,11 @@ use std::ffi::c_void;
 use windows::Win32::Graphics::Direct3D9::IDirect3DTexture9;
 
 use crate::{
-	gamer_picture_manager::{
+	d3d9_utils::create_64x64_d3d9tex, gamer_picture_manager::{
 		trigger_lobby_update_v2, C_GamerPicture, GamerPictureManager, NetPlayer,
-	},
-	img_preprocess::get_amax_user_pfp_img_data,
-	CoolBlurPlugin,
+	}, img_preprocess::{get_amax_user_pfp_img_data, get_default_amax_pfp_img_data}, CoolBlurPlugin
 };
 
-//FIXME: Remove this
-fn get_crusty_img_data() -> Vec<u8> {
-	let dir = known_folders::get_known_folder_path(known_folders::KnownFolder::RoamingAppData)
-		.unwrap()
-		.join("bizarre creations")
-		.join("blur")
-		.join("amax")
-		.join("test.bmp");
-	log::warn!("Gettin crusty from {}", dir.display());
-	std::fs::read(dir).unwrap()
-}
-
-pub fn create_64x64_d3d9tex(img_data: &mut [u8]) -> *mut IDirect3DTexture9 {
-	crate::d3d9_utils::d3d9_create_tex_from_mem_ex(img_data, 64, 64)
-}
 
 // Gorgeous Precious Beautiful Majestic
 // (Okay maybe not Majestic)
@@ -60,12 +43,12 @@ impl MyGamerData {
 				)
 			})
 			.unwrap_or_else(|_| {
-				let crusty_img_data = get_crusty_img_data();
+				let default_player_img_data = get_default_amax_pfp_img_data().unwrap();
 				log::info!(
-					"Got img_data ({} bytes) for \"{username}\" via disk crusty.",
-					crusty_img_data.len()
+					"Got default img_data ({} bytes) for \"{username}\" via HTTP.",
+					default_player_img_data.len()
 				);
-				crusty_img_data
+				default_player_img_data
 			});
 		let tex = create_64x64_d3d9tex(&mut user_img_data);
 		Self {
