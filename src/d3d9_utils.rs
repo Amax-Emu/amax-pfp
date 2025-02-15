@@ -1,47 +1,38 @@
-use image::{load_from_memory_with_format, GenericImageView};
-use std::{
-	ffi::{c_void, CString},
-	iter,
-	sync::LazyLock,
-};
-use windows::Win32::Graphics::Direct3D9::{
-	IDirect3DDevice9, IDirect3DTexture9, D3DFMT_A8R8G8B8, D3DFORMAT, D3DLOCKED_RECT,
-	D3DPOOL,
-	D3DPOOL_MANAGED,
-};
-
 use windows::{
 	core::Interface,
-	core::{HRESULT, PCSTR, PCWSTR},
-	Win32::System::LibraryLoader::{GetModuleHandleW, GetProcAddress},
+	Win32::Graphics::Direct3D9::{
+		IDirect3DDevice9, IDirect3DTexture9, D3DFMT_A8R8G8B8, D3DLOCKED_RECT, D3DPOOL_MANAGED,
+	},
 };
 
 pub fn create_64x64_d3d9tex(img_data: &mut [u8]) -> *mut IDirect3DTexture9 {
-	// d3d9_create_tex_from_mem_ex(img_data, 64, 64) //TGTG
-	d3d9_create_tex_from_mem_ex_v2(img_data, 64, 64) //FIXME
+	d3d9_create_tex_from_mem_ex_v2(img_data, 64, 64)
 }
 
-#[allow(unused)]
+// This is the very funni order in which D3DFMT_A8R8G8B8 requires the texture memory stored as.
+// BEST PART? THAT LIL HINT IS HIDDEN QUITE FAR IN THE DOCS..
+// AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFFS
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
-struct RetardedBGRA {
+struct PixelBGRA {
 	b: u8,
 	g: u8,
 	r: u8,
 	a: u8,
 }
 
-#[allow(unused)]
-fn to_brga(encoded_bmp_image_buffer: &mut [u8]) -> Vec<RetardedBGRA> {
-	let imga =
-		load_from_memory_with_format(&encoded_bmp_image_buffer, image::ImageFormat::Bmp).unwrap();
-	let r: Vec<RetardedBGRA> = imga
-		.pixels()
-		.map(|(_x, _y, p)| p.0)
-		.map(|[r, g, b, a]| RetardedBGRA { r, g, b, a })
-		.collect();
-	log::info!("imgazie {:?} igmalen {}", imga.dimensions(), r.len());
-	r
+impl PixelBGRA {
+	// Format is very dumb: packs of [u8; 4], in this order: [B G R A]...
+	// Thank you unknowntrojan: https://github.com/unknowntrojan/egui-d3d9/blob/a0f5ace6b6fc916ba0e9a6077bc17ac359f01663/egui-d3d9/src/texman.rs#L14
+	fn bmp_to_bgra_vec(encoded_bmp_image_buffer: &mut [u8]) -> Vec<PixelBGRA> {
+		use image::GenericImageView;
+		image::load_from_memory_with_format(encoded_bmp_image_buffer, image::ImageFormat::Bmp)
+			.unwrap()
+			.pixels()
+			.map(|(_x, _y, p)| p.0)
+			.map(|[r, g, b, a]| PixelBGRA { r, g, b, a })
+			.collect()
+	}
 }
 
 // https://github.com/unknowntrojan/egui-d3d9/blob/a0f5ace6b6fc916ba0e9a6077bc17ac359f01663/egui-d3d9/src/texman.rs#L266
@@ -58,7 +49,7 @@ fn d3d9_create_tex_from_mem_ex_v2(
 	let dev: &IDirect3DDevice9 =
 		unsafe { &IDirect3DDevice9::from_raw(crate::CoolBlurPlugin::get_api().get_d3d9dev()) };
 
-	// CreateTexture
+	// dev.CreateTexture CRIMES:
 	unsafe {
 		// https://learn.microsoft.com/en-us/windows/win32/api/d3d9/nf-d3d9-idirect3ddevice9-createtexture
 		// https://learn.microsoft.com/en-us/windows/win32/direct3d9/d3dformat
@@ -74,56 +65,66 @@ fn d3d9_create_tex_from_mem_ex_v2(
 			&mut tex_ptr,
 			std::ptr::null_mut(),
 		);
-		log::info!("We did dev.CreateTexture(tex_ptr: {tex_ptr:?}) -> {r:?}");
+		log::info!("dev.CreateTexture(tex_ptr: {tex_ptr:?}) -> {r:?}");
 		r.unwrap();
-		log::info!("Survived dev.CreateTexture(tex_ptr)");
 	};
 	let tex_ptr = tex_ptr.unwrap();
-	log::info!("We have the first tex_ptr:{tex_ptr:?}");
-
-	// TODO: Convert encoded_bmp_image_buffer to Vec<u8>
-	// Format is very dumb: packs of [u8; 4], in this dumb ass order: [B G R A]...
-	// https://github.com/unknowntrojan/egui-d3d9/blob/a0f5ace6b6fc916ba0e9a6077bc17ac359f01663/egui-d3d9/src/texman.rs#L14
-	// placeholder:
-	let tex_data_len = width * height * 4;
-	let tex_data: Vec<u8> = vec![0xF0, tex_data_len as _];
+	log::info!("tex_ptr:{tex_ptr:?}");
 
 	// Then get the inner texture pixel data with LockRect
 	unsafe {
+		let src = PixelBGRA::bmp_to_bgra_vec(encoded_bmp_image_buffer);
 		let mut rect: D3DLOCKED_RECT = D3DLOCKED_RECT::default();
-		// let lock_flags = D3DLOCK_DISCARD as u32 | D3DLOCK_READONLY as u32;
-		// let lock_flags = D3DLOCK_DISCARD as u32;
-		// let lock_flags = D3DLOCK_DONOTWAIT as u32 | D3DLOCK_NOSYSLOCK as u32;
-		let lock_flags = 0u32;
 		tex_ptr
-			.LockRect(0, &mut rect, std::ptr::null_mut(), lock_flags)
+			.LockRect(0, &mut rect, std::ptr::null_mut(), 0)
 			.unwrap();
-		log::info!("We got tex_ptr.LockRect()");
-		/*
-		let dst: &mut [u8] = std::slice::from_raw_parts_mut(rect.pBits as *mut u8, tex_data.len());
-		dst.copy_from_slice(&tex_data);
-		*/
-		let src = to_brga(encoded_bmp_image_buffer);
-		let dst: &mut [RetardedBGRA] =
-			std::slice::from_raw_parts_mut(rect.pBits as *mut RetardedBGRA, src.len());
+		assert!(width * height == src.len().try_into().unwrap());
+		let dst: &mut [PixelBGRA] =
+			std::slice::from_raw_parts_mut(rect.pBits as *mut PixelBGRA, src.len());
 		dst.copy_from_slice(&src);
 		tex_ptr.UnlockRect(0).unwrap();
 		log::info!("We got tex_ptr.UnlockRect()");
 	}
-	// might want to try:
-	// https://github.com/unknowntrojan/egui-d3d9/blob/a0f5ace6b6fc916ba0e9a6077bc17ac359f01663/egui-d3d9/src/texman.rs#L331
-
 	log::warn!("We survived d3d9_create_tex_from_mem_ex_v2()!");
 	tex_ptr.into_raw() as *mut IDirect3DTexture9
 }
 
+/// Strong independent CoolBlurPlugin don't need no "d3dx9_42.dll!D3DXCreateTextureFromFileInMemoryEx(.)"
 #[allow(unused)]
-// #[deprecated]
+#[deprecated]
 fn d3d9_create_tex_from_mem_ex(
 	tex_buffer: &mut [u8],
 	width: u32,
 	height: u32,
 ) -> *mut IDirect3DTexture9 {
+	use std::{
+		ffi::{c_void, CString},
+		iter,
+		sync::LazyLock,
+	};
+	use windows::{
+		core::HRESULT,
+		Win32::Graphics::Direct3D9::{
+			IDirect3DTexture9, D3DFMT_A8R8G8B8, D3DFORMAT, D3DPOOL, D3DPOOL_MANAGED,
+		},
+	};
+
+	fn get_module_symbol_address(module: &str, symbol: &str) -> Option<usize> {
+		use windows::{
+			core::{PCSTR, PCWSTR},
+			Win32::System::LibraryLoader::{GetModuleHandleW, GetProcAddress},
+		};
+		let module = module
+			.encode_utf16()
+			.chain(iter::once(0))
+			.collect::<Vec<u16>>();
+		let symbol = CString::new(symbol).unwrap();
+		unsafe {
+			let handle = GetModuleHandleW(PCWSTR(module.as_ptr() as *const _)).unwrap();
+			GetProcAddress(handle, PCSTR(symbol.as_ptr() as _)).map(|addr| addr as usize)
+		}
+	}
+
 	type D3DXCreateTextureFromFileInMemoryEx = extern "stdcall" fn(
 		device: *mut c_void,
 		pSrcData: *mut u8,
@@ -141,6 +142,7 @@ fn d3d9_create_tex_from_mem_ex(
 		pPalette: *mut c_void,
 		ppTexture: *mut *mut IDirect3DTexture9,
 	) -> HRESULT;
+
 	static ONCE_FN_D3DX_CREATE_TEXTURE_FROM_FILE_IN_MEMORY_EX: LazyLock<
 		D3DXCreateTextureFromFileInMemoryEx,
 	> = LazyLock::new(|| {
@@ -149,6 +151,7 @@ fn d3d9_create_tex_from_mem_ex(
 				.expect("could not get_module_symbol_address() for 'D3DXCreateTextureFromFileInMemoryEx(..)' function in 'd3dx9_42.dll'");
 		unsafe { std::mem::transmute::<usize, D3DXCreateTextureFromFileInMemoryEx>(func_addr) }
 	});
+
 	let d3d9_func = *ONCE_FN_D3DX_CREATE_TEXTURE_FROM_FILE_IN_MEMORY_EX;
 
 	let mut tex_ptr: *mut IDirect3DTexture9 = std::ptr::null_mut();
@@ -189,16 +192,4 @@ fn d3d9_create_tex_from_mem_ex(
 	.unwrap();
 	log::warn!(")");
 	tex_ptr
-}
-
-fn get_module_symbol_address(module: &str, symbol: &str) -> Option<usize> {
-	let module = module
-		.encode_utf16()
-		.chain(iter::once(0))
-		.collect::<Vec<u16>>();
-	let symbol = CString::new(symbol).unwrap();
-	unsafe {
-		let handle = GetModuleHandleW(PCWSTR(module.as_ptr() as *const _)).unwrap();
-		GetProcAddress(handle, PCSTR(symbol.as_ptr() as _)).map(|addr| addr as usize)
-	}
 }

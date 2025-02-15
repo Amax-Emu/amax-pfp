@@ -41,6 +41,13 @@ pub struct C_GamerPicture {
 	unk4: u32,                 // 0x00, 0x00
 }
 
+impl C_GamerPicture {
+	fn get_name(&self) -> String {
+		let name = String::from_utf8(self.gamer_pic_name.to_vec()).unwrap();
+		name.trim_matches(char::from(0)).to_string()
+	}
+}
+
 #[derive(Debug, Copy, Clone)]
 #[repr(C)]
 pub struct NetPlayer {
@@ -99,8 +106,8 @@ static_detour! {
 
 pub fn install_hook_get_primary_profile_picture_v2(ptr_base: *mut c_void) {
 	type FnGetPrimaryProfilePicture = unsafe extern "system" fn() -> bool;
-	const ORG_FN_ADDRESS_OFFSET: isize = 0x0095E170;
-	let ptr = ptr_base.wrapping_byte_offset(ORG_FN_ADDRESS_OFFSET);
+	const ORG_FN_ADDRESS_OFFSET_GET_PRIMARY_PROFILE_PICTURE: isize = 0x0095E170;
+	let ptr = ptr_base.wrapping_byte_offset(ORG_FN_ADDRESS_OFFSET_GET_PRIMARY_PROFILE_PICTURE);
 	unsafe {
 		let ptr = std::mem::transmute::<*mut c_void, FnGetPrimaryProfilePicture>(ptr);
 		GetPrimaryProfilePictureHook
@@ -125,58 +132,54 @@ pub fn install_hook_request_remote_picture(ptr_base: *mut c_void) {
 	}
 }
 
-pub fn pretty_name(name_buf: &[u8]) -> String {
-	let name = String::from_utf8(name_buf.to_vec()).unwrap();
-	name.trim_matches(char::from(0)).to_string()
-}
-
 fn get_primary_profile_picture_hook() -> bool {
 	log::trace!("GetPrimaryProfilePictureHook!");
-	// NOTE: Getting the img_data in the main thread will freeze game until response or timeout.
-	// So let us spawn a thread to do all of this in the background
-	// This is not sound but I wanna try it
-	std::thread::spawn(move || {
-		let ptr_base = CoolBlurPlugin::get_exe_base_ptr();
-		let local_picures = unsafe {
-			*(get_gamer_picture_manager_v2(ptr_base)
-				.unwrap()
-				.local_pictures_ptr)
-		};
-		for local_gamer_pic in local_picures {
-			let local_gamer_pic = unsafe { &mut *local_gamer_pic };
-			let name = pretty_name(&local_gamer_pic.gamer_pic_name);
-			if name == "GAMERPIC_0" {
-				let username = match get_saved_profile_username_v2(ptr_base) {
-					Ok(username) => username.to_string(),
-					Err(e) => {
-						log::error!(
-								"Skipping primary profile picture setup because get_saved_profile_username() failed: {e}. "
-							);
-						continue;
-					}
-				};
+	// This hook gets called from the main thread
+	// Getting the img_data in the main thread will freeze game until response or timeout.
+	// We spawn a thread to do all that in the background
+	std::thread::Builder::new()
+		.name("AMAX_PFP_Primary_profile_fetcher".to_string())
+		.spawn(move || {
+			let ptr_base = CoolBlurPlugin::get_exe_base_ptr();
+			let local_picures = unsafe {
+				*(get_gamer_picture_manager_v2(ptr_base)
+					.unwrap()
+					.local_pictures_ptr)
+			};
+			for local_gamer_pic in local_picures {
+				let local_gamer_pic = unsafe { &mut *local_gamer_pic };
+				if local_gamer_pic.get_name() == "GAMERPIC_0" {
+					let username = match get_saved_profile_username_v2(ptr_base) {
+						Ok(username) => username.to_string(),
+						Err(e) => {
+							log::error!("Primary profile picture setup failed: {e}. ");
+							continue;
+						}
+					};
 
-				//let img_data = get_image_from_url("https://cdn.discordapp.com/avatars/925665499692544040/483eb1b92db6a449a0e2bed9a8b48bb3.png");
-				log::info!("Loading primary profile picture for \"{username}\"...");
-				let mut img_data = match get_primary_profile_img_data(&username) {
-					Ok(img_data) => img_data,
-					_ => return,
-				};
-				local_gamer_pic.texture_ptr =
-					crate::d3d9_utils::create_64x64_d3d9tex(&mut img_data); // YAY?
-				local_gamer_pic.active = true;
-				local_gamer_pic.free = false;
-				log::info!("We set the primary profile pic!!!! (?)");
+					//let img_data = get_image_from_url("https://cdn.discordapp.com/avatars/925665499692544040/483eb1b92db6a449a0e2bed9a8b48bb3.png");
+					log::info!("Loading primary profile picture for \"{username}\"...");
+					let mut img_data = match get_primary_profile_img_data(&username) {
+						Ok(img_data) => img_data,
+						_ => return,
+					};
+					local_gamer_pic.texture_ptr =
+						crate::d3d9_utils::create_64x64_d3d9tex(&mut img_data); // YAY?
+					local_gamer_pic.active = true;
+					local_gamer_pic.free = false;
+					log::info!("We set the primary profile pic!!!! (?)");
+				}
 			}
-		}
-	});
+		})
+		.expect("Not able to create thread?");
 
 	false
 }
 
+/// When does this thing even run?
 fn request_remote_picture_hook(arg: i32) -> bool {
 	type FnRequestRemotePicture = unsafe extern "system" fn(i32) -> bool;
-	const ORG_FN_ADDRESS_OFFSET_REQUEST_REMOTE_PICTURE: isize = 0x786D20; // Yea Yea Yea we should save the original somewhere. Is this thing even called?
+	const ORG_FN_ADDRESS_OFFSET_REQUEST_REMOTE_PICTURE: isize = 0x786D20; // Yea Yea Yea we should save the original somewhere.
 	let ptr_base = CoolBlurPlugin::get_exe_base_ptr();
 	let ptr = ptr_base.wrapping_byte_offset(ORG_FN_ADDRESS_OFFSET_REQUEST_REMOTE_PICTURE);
 	unsafe {

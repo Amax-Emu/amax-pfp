@@ -3,11 +3,13 @@ use std::ffi::c_void;
 use windows::Win32::Graphics::Direct3D9::IDirect3DTexture9;
 
 use crate::{
-	d3d9_utils::create_64x64_d3d9tex, gamer_picture_manager::{
+	d3d9_utils::create_64x64_d3d9tex,
+	gamer_picture_manager::{
 		trigger_lobby_update_v2, C_GamerPicture, GamerPictureManager, NetPlayer,
-	}, img_preprocess::{get_amax_user_pfp_img_data, get_default_amax_pfp_img_data}, CoolBlurPlugin
+	},
+	img_preprocess::{get_amax_user_pfp_img_data, get_default_amax_pfp_img_data},
+	CoolBlurPlugin,
 };
-
 
 // Gorgeous Precious Beautiful Majestic
 // (Okay maybe not Majestic)
