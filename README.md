@@ -1,15 +1,20 @@
-# AMAX PROFILE PICS WOOOOOOOOO
-LETSOGOOOOOOOOOOOOO it kinda works now
-t kinda works now???
-t kinda works now!!!!!!
-WOOOOOOOOOOOOOOOOOOOOOOOOOOOOOO
+# AMAX PROFILE PICS YIPPIEEEEEEEEEEEEEEEEEEEEEE
+LETSGOOOOOOOOOOOOO it kinda works now!
+ITTT works now!!!!!!
+YYYYYYYYYYYYYYYYYYYYYYEEEEEEEEEEEEEEEEAAAAAAAAAAAAAAAAAAASSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSS
 
+## Building
+```
+cargo build --release
+cp target\i686-pc-windows-msvc\release\amax_pfp.dll D:\Blur\amax\dlls\amax_pfp.dll
+
+# cargo build
+# cp target\i686-pc-windows-msvc\debug\amax_pfp.dll D:\Blur\amax\dlls\amax_pfp.dll
+# cp target\i686-pc-windows-msvc\debug\amax_pfp.pdb D:\Blur\amax\dlls\amax_pfp.pdb
+```
 
 ## TODO
-- [ ] Async pic fetch
-- [ ] Fix passing some of the pointers (current way is uggo)
-- [ ] Refactor modules (must put stuff in src/lib.rs)
-- [ ] Put some stuff in src/plugin.rs
-- [ ] Put some stuff in CoolBlurPlugin
-- [ ] Move some of the D3D9 functionality to BlurAPI (Mainly to get texture)
-- [ ] Clean up hooks unused hooks
+- [ ] Fetching in one tread, lobby updating in another
+- [ ] Clean unused hooks and stuff
+
+

@@ -3,48 +3,37 @@ use log::LevelFilter;
 use simplelog::{
 	ColorChoice, CombinedLogger, ConfigBuilder, TermLogger, TerminalMode, WriteLogger,
 };
-use std::{ffi::c_void, sync::LazyLock};
+use std::ffi::c_void;
 
-use windows::{core::PCSTR, Win32::System::LibraryLoader::GetModuleHandleA};
+mod data;
+mod downloader;
+mod hooks;
+mod tex;
+mod updater;
 
-mod d3d9_utils;
-mod gamer_picture_manager;
-mod img_preprocess;
-mod ll_crimes;
-
-#[allow(dead_code)]
-pub struct CoolBlurPlugin {}
+pub struct MyPlugin {}
 
 static mut G_API: Option<&dyn BlurAPI> = None;
 
-impl CoolBlurPlugin {
-	fn new(_api: &dyn BlurAPI) -> Self {
-		let ptr_base = Self::get_exe_base_ptr();
-		gamer_picture_manager::install_hook_request_remote_picture(ptr_base); // does this do anything?
-		gamer_picture_manager::install_hook_get_primary_profile_picture_v2(ptr_base);
-		std::thread::spawn(ll_crimes::run);
+impl MyPlugin {
+	fn new(api: &dyn BlurAPI) -> Self {
+		let ptr_base = api.get_exe_base_ptr();
+		hooks::install_hook_request_remote_picture(ptr_base); // does this do anything?
+		hooks::install_hook_get_primary_profile_picture_v2(ptr_base);
+		std::thread::spawn(updater::Updater::run);
 		Self {}
-	}
-
-	/// Just for util
-	pub fn get_exe_base_ptr() -> *mut c_void {
-		//NOTE: using LazyLock for this is kinda stupid
-		// I just have a weird personal vendetta against GetModuleHandleA(..)
-		static ONCE: LazyLock<usize> = LazyLock::new(|| {
-			let ptr_base: *mut c_void = unsafe { GetModuleHandleA(PCSTR::null()) }.unwrap().0 as _;
-			assert!(ptr_base as usize == 0x00400000);
-			ptr_base as usize
-		});
-		let p: usize = *ONCE;
-		p as *mut c_void
 	}
 
 	pub fn get_api() -> &'static dyn BlurAPI {
 		unsafe { G_API.unwrap() }
 	}
+
+	pub fn get_exe_base_ptr() -> *mut c_void {
+		Self::get_api().get_exe_base_ptr()
+	}
 }
 
-impl BlurPlugin for CoolBlurPlugin {
+impl BlurPlugin for MyPlugin {
 	fn name(&self) -> &'static str {
 		"AMAX_PFP"
 	}
@@ -64,7 +53,7 @@ fn plugin_init(api: &'static mut dyn BlurAPI) -> Box<dyn BlurPlugin> {
 	unsafe {
 		G_API = Some(api);
 	}
-	Box::new(CoolBlurPlugin::new(api))
+	Box::new(MyPlugin::new(api))
 }
 
 fn init_logs() {
@@ -86,5 +75,5 @@ fn init_logs() {
 		WriteLogger::new(LevelFilter::Trace, cfg, log_file),
 	])
 	.unwrap();
-	log_panics::Config::new().install_panic_hook();
+	log_panics::init();
 }

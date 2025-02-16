@@ -6,24 +6,24 @@ use windows::{
 };
 
 pub fn create_64x64_d3d9tex(img_data: &mut [u8]) -> *mut IDirect3DTexture9 {
-	d3d9_create_tex_from_mem_ex_v2(img_data, 64, 64)
+	d3d9_create_tex_from_mem(img_data, 64, 64)
 }
 
 // This is the very funni order in which D3DFMT_A8R8G8B8 requires the texture memory stored as.
-// BEST PART? THAT LIL HINT IS HIDDEN QUITE FAR IN THE DOCS..
+// BEST PART? THAT LIL HINT IS HIDDEN QUITE DEEP IN THE DOCS..
 // AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFFS
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
 struct PixelBGRA {
-	b: u8,
-	g: u8,
-	r: u8,
-	a: u8,
+	b: u8, // blue
+	g: u8, // green
+	r: u8, // red
+	a: u8, // alpha
 }
 
 impl PixelBGRA {
 	// Format is very dumb: packs of [u8; 4], in this order: [B G R A]...
-	// Thank you unknowntrojan: https://github.com/unknowntrojan/egui-d3d9/blob/a0f5ace6b6fc916ba0e9a6077bc17ac359f01663/egui-d3d9/src/texman.rs#L14
+	// Credit to unknowntrojan & his egui-d3d9 lib: https://github.com/unknowntrojan/egui-d3d9/blob/a0f5ace6b6fc916ba0e9a6077bc17ac359f01663/egui-d3d9/src/texman.rs#L14
 	fn bmp_to_bgra_vec(encoded_bmp_image_buffer: &mut [u8]) -> Vec<PixelBGRA> {
 		use image::GenericImageView;
 		image::load_from_memory_with_format(encoded_bmp_image_buffer, image::ImageFormat::Bmp)
@@ -36,63 +36,60 @@ impl PixelBGRA {
 }
 
 // https://github.com/unknowntrojan/egui-d3d9/blob/a0f5ace6b6fc916ba0e9a6077bc17ac359f01663/egui-d3d9/src/texman.rs#L266
-// FIXME: I really wanna try this
-#[allow(unused)]
-fn d3d9_create_tex_from_mem_ex_v2(
+fn d3d9_create_tex_from_mem(
 	encoded_bmp_image_buffer: &mut [u8],
 	width: u32,
 	height: u32,
 ) -> *mut IDirect3DTexture9 {
-	log::warn!("We d3d9_create_tex_from_mem_ex_v2()");
 	let mut tex_ptr: Option<IDirect3DTexture9> = None;
 
 	let dev: &IDirect3DDevice9 =
-		unsafe { &IDirect3DDevice9::from_raw(crate::CoolBlurPlugin::get_api().get_d3d9dev()) };
+		unsafe { &IDirect3DDevice9::from_raw(crate::MyPlugin::get_api().get_d3d9dev()) };
 
-	// dev.CreateTexture CRIMES:
 	unsafe {
 		// https://learn.microsoft.com/en-us/windows/win32/api/d3d9/nf-d3d9-idirect3ddevice9-createtexture
 		// https://learn.microsoft.com/en-us/windows/win32/direct3d9/d3dformat
 		// https://learn.microsoft.com/en-us/windows/win32/direct3d9/d3dpool
-		log::info!("We CreateTexture...");
 		let r = dev.CreateTexture(
 			width,
 			height,
 			1,
 			0u32,
 			D3DFMT_A8R8G8B8,
-			D3DPOOL_MANAGED,
+			D3DPOOL_MANAGED, // D3DPOOL_MANAGED allows this texture to survive dev.Reset(..)
 			&mut tex_ptr,
 			std::ptr::null_mut(),
 		);
-		log::info!("dev.CreateTexture(tex_ptr: {tex_ptr:?}) -> {r:?}");
-		r.unwrap();
+		log::trace!("dev.CreateTexture(tex_ptr: {tex_ptr:?}) -> {r:?}");
+		r.expect("dev.CreateTexture failed");
 	};
-	let tex_ptr = tex_ptr.unwrap();
-	log::info!("tex_ptr:{tex_ptr:?}");
+	let tex_ptr = tex_ptr.expect("dev.CreateTexture returned null tex ptr");
 
-	// Then get the inner texture pixel data with LockRect
+	// Then get to writing the inner texture pixel data with tex.LockRect()
 	unsafe {
 		let src = PixelBGRA::bmp_to_bgra_vec(encoded_bmp_image_buffer);
 		let mut rect: D3DLOCKED_RECT = D3DLOCKED_RECT::default();
 		tex_ptr
 			.LockRect(0, &mut rect, std::ptr::null_mut(), 0)
-			.unwrap();
-		assert!(width * height == src.len().try_into().unwrap());
+			.expect("tex_ptr.LockRect(..) failed");
+		assert!(width * height == src.len() as u32);
 		let dst: &mut [PixelBGRA] =
 			std::slice::from_raw_parts_mut(rect.pBits as *mut PixelBGRA, src.len());
 		dst.copy_from_slice(&src);
-		tex_ptr.UnlockRect(0).unwrap();
-		log::info!("We got tex_ptr.UnlockRect()");
+		tex_ptr
+			.UnlockRect(0)
+			.expect("tex_ptr.UnlockRect(..) failed"); // UPLOAD IT
 	}
-	log::warn!("We survived d3d9_create_tex_from_mem_ex_v2()!");
+	log::trace!("Created IDirect3DTexture9: {tex_ptr:?}");
 	tex_ptr.into_raw() as *mut IDirect3DTexture9
+	// .into_raw() prevents the texture getting cleared by mem::drop().
+	// Only the d3d9 device knows about it now
 }
 
-/// Strong independent CoolBlurPlugin don't need no "d3dx9_42.dll!D3DXCreateTextureFromFileInMemoryEx(.)"
+/// Strong independent plugin, don't need no "d3dx9_42.dll!D3DXCreateTextureFromFileInMemoryEx(.)"
 #[allow(unused)]
 #[deprecated]
-fn d3d9_create_tex_from_mem_ex(
+fn d3d9_create_tex_from_mem_ex_v1(
 	tex_buffer: &mut [u8],
 	width: u32,
 	height: u32,
@@ -159,7 +156,7 @@ fn d3d9_create_tex_from_mem_ex(
 	log::warn!("D3DXCreateTextureFromFileInMemoryEx(");
 	d3d9_func(
 		// ptr to IDirect3DDevice9
-		crate::CoolBlurPlugin::get_api().get_d3d9dev(),
+		crate::MyPlugin::get_api().get_d3d9dev(),
 		// ptr to bytes img data
 		tex_buffer.as_mut_ptr(),
 		// size of file in mem
