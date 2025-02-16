@@ -1,93 +1,79 @@
-use std::ffi::c_void;
-use simplelog::*;
-
-use windows::{
-    core::PCSTR,
-    Win32::System::SystemServices::{DLL_PROCESS_ATTACH, DLL_PROCESS_DETACH},
-    Win32::{Foundation::HMODULE, System::LibraryLoader::GetModuleHandleA},
+use blur_plugins_core::{BlurAPI, BlurPlugin};
+use log::LevelFilter;
+use simplelog::{
+	ColorChoice, CombinedLogger, ConfigBuilder, TermLogger, TerminalMode, WriteLogger,
 };
+use std::ffi::c_void;
 
-mod d3d9_utils;
-mod gamer_picture_manager;
-mod img_preprocess;
-use crate::gamer_picture_manager::*;
+mod data;
+mod downloader;
+mod hooks;
+mod tex;
+mod updater;
 
-pub static EXE_BASE_ADDR: i32 = 0x00400000;
+pub struct MyPlugin {}
 
-/*
-00000040 A8 EA 00 00:00 00 00 00|00 00 00 00:00 00 00 00
-00000050 00 00 00 0C:00 00 00 00|01 47 41 4D:45 52 50 49
-00000060 43 5F 30 00:00 00 00 00|00 00 00 00:00 00 00 00
-00000070 00 00 00 00:00 00 00 00|00 00 00 00:40 00 00 00
-00000080 00 04 00 E0:71 90 14 B0|CB 40 0F 00:00 00 00 4C
+static mut G_API: Option<&dyn BlurAPI> = None;
 
+impl MyPlugin {
+	fn new(api: &dyn BlurAPI) -> Self {
+		let ptr_base = api.get_exe_base_ptr();
+		hooks::install_hook_request_remote_picture(ptr_base); // does this do anything?
+		hooks::install_hook_get_primary_profile_picture_v2(ptr_base);
+		std::thread::spawn(updater::Updater::run);
+		Self {}
+	}
 
-const DATA: [u8; 80] = [
-    // Offset 0x00000040 to 0x0000008F
-    0xA8, 0xEA, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x0C, 0x00, 0x00, 0x00, 0x00,
-    0x01, 0x47, 0x41, 0x4D, 0x45, 0x52, 0x50, 0x49, 0x43, 0x5F, 0x30, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x40, 0x00, 0x00, 0x00, 0x00, 0x04, 0x00, 0xE0, 0x71, 0x90, 0x14, 0xB0,
-    0xCB, 0x40, 0x0F, 0x00, 0x00, 0x00, 0x00, 0x4C
-];
+	pub fn get_api() -> &'static dyn BlurAPI {
+		unsafe { G_API.unwrap() }
+	}
 
+	pub fn get_exe_base_ptr() -> *mut c_void {
+		Self::get_api().get_exe_base_ptr()
+	}
+}
 
-*/
+impl BlurPlugin for MyPlugin {
+	fn name(&self) -> &'static str {
+		"AMAX_PFP"
+	}
+
+	fn on_event(&self, event: &blur_plugins_core::BlurEvent) {
+		log::trace!("AMAX_PFP: on_event({event:?})");
+	}
+
+	fn free(&self) {
+		log::trace!("AMAX_PFP: Unloading!");
+	}
+}
 
 #[no_mangle]
-#[allow(non_snake_case)]
-extern "system" fn DllMain(
-    dll_module: windows::Win32::Foundation::HMODULE,
-    call_reason: u32,
-    _reserved: *mut std::ffi::c_void,
-) -> i32 {
-    match call_reason {
-        DLL_PROCESS_ATTACH => init(dll_module),
-        DLL_PROCESS_DETACH => free(dll_module),
-        _ => (),
-    }
-    true.into()
+fn plugin_init(api: &'static mut dyn BlurAPI) -> Box<dyn BlurPlugin> {
+	init_logs();
+	unsafe {
+		G_API = Some(api);
+	}
+	Box::new(MyPlugin::new(api))
 }
 
-pub fn init(module: HMODULE) {
-    let cfg = ConfigBuilder::new()
-        .set_time_offset_to_local()
-        .unwrap()
-        .build();
+fn init_logs() {
+	let cfg = ConfigBuilder::new()
+		.set_time_offset_to_local()
+		.unwrap()
+		.add_filter_allow_str("amax_pfp")
+		.build();
 
-    CombinedLogger::init(vec![
-        TermLogger::new(
-            LevelFilter::Trace,
-            cfg,
-            TerminalMode::Mixed,
-            ColorChoice::Auto,
-        ),
-        WriteLogger::new(
-            LevelFilter::Trace,
-            Config::default(),
-            std::fs::File::create(".\\amax-pfp.log")
-                .expect("Couldn't create log file: .\\amax-pfp.log"),
-        ),
-    ])
-    .unwrap();
-    log_panics::init();
-    log::info!("Hi from: {module:X?}");
+	let log_file = blur_plugins_core::create_log_file("amax_pfp.log").unwrap();
 
-    unsafe {
-        create_get_primary_profile_picture_hook();
-        //create_wipe_remote_pictures_hook();
-        //create_request_remote_picture_game_hook();
-
-        std::thread::spawn(|| {
-            gamer_picture_manager::remote_pfp_updater();
-        });
-    };
-
-    let _ptr_base: *mut c_void = unsafe { GetModuleHandleA(PCSTR::null()) }.unwrap().0 as _;
-}
-
-pub fn free(module: HMODULE) {
-    log::info!("Bye from: {module:X?}");
+	CombinedLogger::init(vec![
+		TermLogger::new(
+			LevelFilter::Trace,
+			cfg.clone(),
+			TerminalMode::Mixed,
+			ColorChoice::Auto,
+		),
+		WriteLogger::new(LevelFilter::Trace, cfg, log_file),
+	])
+	.unwrap();
+	log_panics::init();
 }
